@@ -1,0 +1,17 @@
+{
+  "name": "cursor-plugin-cc",
+  "owner": { "name": "cursor-plugin-cc" },
+  "metadata": {
+    "description": "Cursor plugin for Claude Code — delegation and code review.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "cursor",
+      "description": "Use Cursor from Claude Code to review code or delegate tasks.",
+      "version": "0.1.0",
+      "author": { "name": "cursor-plugin-cc" },
+      "source": "./plugins/cursor"
+    }
+  ]
+}
