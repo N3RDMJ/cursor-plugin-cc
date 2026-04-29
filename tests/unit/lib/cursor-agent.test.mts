@@ -50,7 +50,9 @@ function makeRun(events: SDKMessage[], result: RunResult): Run {
   return {
     id: result.id,
     agentId: "agent-test",
-    status,
+    get status() {
+      return status;
+    },
     get result() {
       return result.result;
     },

@@ -54,10 +54,7 @@ export interface SendTaskOptions {
   onEvent?: (event: SDKMessage) => void;
 }
 
-export interface OneShotOptions extends CursorAgentOptions {
-  timeoutMs?: number;
-  onEvent?: (event: SDKMessage) => void;
-}
+export type OneShotOptions = CursorAgentOptions & SendTaskOptions;
 
 interface RequestOptions {
   apiKey?: string;
@@ -206,6 +203,9 @@ async function collectRunResult(run: Run, options: SendTaskOptions): Promise<Cur
         }
       }
     }
+    // Stream is drained — clear the timer before awaiting wait() so a
+    // late-firing timeout can't flip a naturally-finished run to cancelled.
+    if (timeout) clearTimeout(timeout);
     const result = await run.wait();
     const status: CursorAgentStatus = timedOut
       ? "cancelled"
