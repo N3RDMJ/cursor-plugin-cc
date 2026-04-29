@@ -273,10 +273,12 @@ node cursor-companion.mjs <command> [args...] [flags]
 | `cancel <job-id>` | Cancel an active job |
 | `setup` | Check dependencies, validate API key |
 
-- [ ] Argument parsing (`lib/args.mts` — minimal, no heavy deps)
-- [ ] Subcommand routing
-- [ ] Global flags: `--model`, `--timeout`, `--json` (machine-readable output)
-- [ ] Exit codes: 0 success, 1 error, 2 invalid args
+- [x] Argument parsing (`lib/args.mts` — minimal, no heavy deps)
+- [x] Subcommand routing (handlers live in `commands/<name>.mts`)
+- [x] Subcommand-local flags: `--model`, `--timeout`, `--json`, `--help`
+- [x] Exit codes: 0 success, 1 error, 2 invalid args
+- [x] CLI takes a `CommandIO` (stdout/stderr/cwd/env) so tests can inject
+      sinks instead of writing to the real process streams.
 
 ### 3.2 `task` Subcommand
 
@@ -284,17 +286,17 @@ node cursor-companion.mjs <command> [args...] [flags]
 node cursor-companion.mjs task "Refactor the auth module" --write --model composer-2
 ```
 
-- [ ] Create job via job-control
-- [ ] Create Cursor agent via cursor-agent
-- [ ] Send prompt with workspace context (branch, recent commits, changed files)
-- [ ] Stream events to stdout in real-time (use `renderStreamEvent` over the
+- [x] Create job via job-control
+- [x] Create Cursor agent via cursor-agent
+- [x] Send prompt with workspace context (branch, recent commits, changed files)
+- [x] Stream events to stdout in real-time (`renderStreamEvent` over the
       `AgentEvent` mapper from §2.1 — same shape as cookbook `runPlainPrompt`)
-- [ ] On completion: persist result, update job status
-- [ ] `--write` flag: allow file modifications (default: read-only analysis)
-- [ ] `--resume-last` flag: resume most recent agent session
-- [ ] `--background` flag: run in background, return job ID immediately
-- [ ] `--force` flag: pass `local.force` through (recover stuck local run)
-- [ ] `--cloud` flag: run on Cursor cloud against detected repo origin
+- [x] On completion: persist result, update job status
+- [x] `--write` flag: allow file modifications (default: read-only analysis)
+- [x] `--resume-last` flag: resume most recent agent session
+- [x] `--background` flag: run in background, return job ID immediately
+- [x] `--force` flag: pass `local.force` through (recover stuck local run)
+- [x] `--cloud` flag: run on Cursor cloud against detected repo origin
 
 ### 3.3 `review` Subcommand
 
@@ -302,12 +304,13 @@ node cursor-companion.mjs task "Refactor the auth module" --write --model compos
 node cursor-companion.mjs review [--staged] [--adversarial]
 ```
 
-- [ ] Collect git diff (staged or all changes)
-- [ ] Build review prompt with diff, file list, and project context
-- [ ] Request structured output matching review schema
-- [ ] Parse and validate Cursor's response against schema
-- [ ] Output structured review (verdict, findings, next steps)
-- [ ] `--adversarial` flag: switches prompt to challenge design decisions
+- [x] Collect git diff (staged or all changes)
+- [x] Build review prompt with diff, file list, and project context
+- [x] Request structured output matching review schema
+- [x] Parse and validate Cursor's response against schema (tolerant fence
+      stripping; verdict/summary/findings/next_steps shape checks)
+- [x] Output structured review (verdict, findings, next steps)
+- [x] `adversarial-review` subcommand uses challenge-the-design instructions
 
 Review output schema (matches codex plugin):
 ```typescript
@@ -334,20 +337,23 @@ interface ReviewOutput {
 node cursor-companion.mjs setup
 ```
 
-- [ ] Check Node.js version (>= 18)
-- [ ] Check `@cursor/sdk` installed
-- [ ] Validate `CURSOR_API_KEY` — call `Cursor.me()` to verify auth
-- [ ] List available models via `Cursor.models.list()` — apply cookbook's
-      dedupe + variant-disambiguation (`dedupeModelChoices`,
-      `disambiguateDuplicateLabels`) so multi-variant models render as one
-      readable picker entry per concrete `ModelSelection`
-- [ ] Report readiness status
+- [x] Check Node.js version (>= 18)
+- ~~Check `@cursor/sdk` installed~~ (implicit at import-time; if it's missing
+      the CLI fails to load before this check runs)
+- [x] Validate `CURSOR_API_KEY` — call `Cursor.me()` to verify auth
+- [x] List available models via `Cursor.models.list()` — apply cookbook
+      `modelToChoices`-style flattening so multi-variant models render as one
+      row per concrete `ModelSelection`
+- [x] Report readiness status (text + `--json` machine-readable)
 
 ### 3.5 `status`, `result`, `cancel` Subcommands
 
-- [ ] `status` — read job index, render table. With `--job-id`, show single job detail
-- [ ] `result <job-id>` — read persisted result, output verbatim
-- [ ] `cancel <job-id>` — find active run, call cancel, update job status
+- [x] `status` — read job index, render table. Positional `<job-id>` shows
+      detail. Filters: `--type`, `--status`, `--limit`, `--json`.
+- [x] `result <job-id>` — read persisted result; `--log` reads streaming log;
+      `--json` emits the full JobRecord
+- [x] `cancel <job-id>` — capability-checked cancel via `cancelJob`
+      (returns 1 + reason when not cancellable)
 
 **Exit criteria**: Each subcommand works end-to-end from CLI. Manual test: `node cursor-companion.mjs setup` succeeds with valid API key.
 
