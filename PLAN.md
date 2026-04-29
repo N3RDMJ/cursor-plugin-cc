@@ -218,16 +218,16 @@ Job and session state persisted to disk.
 
 ### 2.5 `lib/git.mts` — Git Helpers
 
-- [ ] `getDiff(options?)` — staged/unstaged diff for review
-- [ ] `getStatus()` — working tree status summary
-- [ ] `getRecentCommits(n)` — last N commit messages + hashes
-- [ ] `getBranch()` — current branch name
-- [ ] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
-- [ ] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
-- [ ] `getChangedFiles()` — list of modified/added/deleted files
-- [ ] `detectCloudRepository(cwd)` → `{ url, startingRef? }` — port from cookbook
-      `src/agent.ts` (handles `git@github.com:`, `ssh://`, `https://` forms,
-      strips `.git`). Used by §2.1 cloud-mode follow-on.
+- [x] `getDiff(options?)` — staged/unstaged diff for review
+- [x] `getStatus()` — working tree status summary
+- [x] `getRecentCommits(n)` — last N commit messages + hashes
+- [x] `getBranch()` — current branch name
+- [x] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
+- [x] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
+- [x] `getChangedFiles()` — list of modified/added/deleted files
+- [x] `detectCloudRepository(cwd)` + `normalizeGitHubRemote(remote)` — port
+      from cookbook `src/agent.ts` (SSH / `ssh://` / `https://` forms, strip
+      `.git`). Used by §2.1 cloud-mode follow-on.
 
 ### 2.6 `lib/render.mts` — Terminal Output
 
