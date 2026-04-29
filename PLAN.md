@@ -3,6 +3,25 @@
 Claude Code plugin that delegates work to Cursor's AI agent via `@cursor/sdk`.
 Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) architecture.
 
+### Reference: Cursor cookbook `coding-agent-cli`
+
+We mine [`cursor/cookbook/sdk/coding-agent-cli`](https://github.com/cursor/cookbook/tree/main/sdk/coding-agent-cli)
+for SDK-usage patterns. We do **not** vendor the project — it is Bun-only (OpenTUI via
+`bun:ffi`) and is a standalone interactive CLI, not a plugin backend. Specific files we
+lift patterns from:
+
+| Cookbook file | What we take | Where it lands |
+|--------------|--------------|----------------|
+| `src/agent.ts` `emitSdkMessage` | SDKMessage → flat `AgentEvent` mapper | §2.6 `render.mts` (also exposed by 2.1) |
+| `src/agent.ts` `buildPrompt` | System-instruction wrapper around user prompt | §2.1 `cursor-agent.mts` |
+| `src/agent.ts` `detectCloudRepository` / `normalizeGitHubRemote` | Cloud-mode repo detection | §2.1 (cloud-mode follow-on) |
+| `src/agent.ts` model dedupe / variant disambiguation | Model picker output for `setup` | §3.4 `setup` subcommand |
+| `src/agent.ts` `cancelCurrentRun` (`run.supports("cancel")`) | Capability-checked cancel | §2.1 + §2.4 job-control |
+| `src/agent.ts` `summarizeToolArgs` / `formatDuration` | Tool-call + duration formatting | §2.6 `render.mts` |
+| `src/index.ts` `runPlainPrompt` / `renderPlainEvent` | Non-interactive streaming-to-stdout | §3.2 `task` subcommand |
+
+Anything TUI/Bun/OpenTUI-related is intentionally ignored.
+
 ---
 
 ## Phase 1: Project Scaffolding
@@ -147,6 +166,25 @@ Key behaviors:
 - [x] Timeout handling: cancel run if it exceeds configurable timeout (`SendTaskOptions.timeoutMs`)
 - [x] Account helpers: `whoami` / `listModels` for `/cursor:setup`
 
+Follow-on items (from cookbook absorption — not yet implemented):
+- [ ] `buildPrompt(prompt, instructions?)` — wrap user prompt with default system
+      instructions (mirrors cookbook `AGENT_INSTRUCTIONS`). Make instructions
+      overridable per-call so `review` can supply its own.
+- [ ] Cloud execution mode: optional `mode: "local" | "cloud"` on
+      `CursorAgentOptions`; when `cloud`, pass `cloud: { repos: [...] }` to
+      `Agent.create`. Port `detectCloudRepository` + `normalizeGitHubRemote` to
+      `lib/git.mts` (§2.5) and consume from here.
+- [ ] `local.force` passthrough — surface a `force?: boolean` option that maps
+      to `local: { force: true }` so `task --force` can expire a stuck run.
+- [ ] Capability-checked cancel: replace bare `run.cancel()` in
+      `collectRunResult`'s timeout path with `run.supports("cancel")` /
+      `run.unsupportedReason("cancel")` and bubble the reason via `CursorRunResult`.
+- [ ] Token usage: include `usage?: { inputTokens?; outputTokens? }` on
+      `CursorRunResult` (read from `RunResult.usage`).
+- [ ] Export a public `AgentEvent` discriminated union + `toAgentEvent(SDKMessage)`
+      mapper (the cookbook's `emitSdkMessage` factored out) so render/CLI layers
+      consume a stable shape instead of raw `SDKMessage`.
+
 ### 2.2 `lib/workspace.mts` — Workspace Resolution
 
 Slim, single-purpose module. Mirrors codex-plugin-cc's `workspace.mjs`.
@@ -173,7 +211,8 @@ Job and session state persisted to disk.
 - [ ] `updateJobStatus(jobId, status, result?)` — pending → running → completed/failed/cancelled
 - [ ] `getJob(jobId)` → full job state
 - [ ] `listJobs(filter?)` → summary table
-- [ ] `cancelJob(jobId)` — calls `run.cancel()` on the Cursor SDK
+- [ ] `cancelJob(jobId)` — uses the capability-checked cancel path from §2.1
+      (returns `{ cancelled: false, reason }` when `run.supports("cancel")` is false)
 - [ ] Background job tracking: maintain in-memory map of active runs for cancellation
 - [ ] Job types: `task`, `review`, `adversarial-review`
 
@@ -186,13 +225,22 @@ Job and session state persisted to disk.
 - [ ] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
 - [ ] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
 - [ ] `getChangedFiles()` — list of modified/added/deleted files
+- [ ] `detectCloudRepository(cwd)` → `{ url, startingRef? }` — port from cookbook
+      `src/agent.ts` (handles `git@github.com:`, `ssh://`, `https://` forms,
+      strips `.git`). Used by §2.1 cloud-mode follow-on.
 
 ### 2.6 `lib/render.mts` — Terminal Output
 
 - [ ] `renderJobTable(jobs)` — formatted table of jobs with status, type, elapsed time
-- [ ] `renderStreamEvent(event)` — format a single stream event for terminal display
+- [ ] `renderStreamEvent(event)` — format a single `AgentEvent` (the flat shape
+      from §2.1) for terminal display. Mirrors cookbook `renderPlainEvent`:
+      assistant text → stdout; thinking/tool/status/task → annotated stderr lines.
 - [ ] `renderReviewResult(review)` — format structured review output with severity colors
 - [ ] `renderError(error)` — consistent error formatting
+- [ ] `formatDuration(ms)` — small helper, lifted from cookbook
+- [ ] `summarizeToolArgs(toolName, args)` — concise one-line tool-call summary
+      (port the keyed-lookup table from cookbook `getToolSummaryKeys` —
+      read/glob/grep/shell/edit each get their own preferred argument keys).
 
 **Exit criteria**: Unit tests for each module. `cursor-agent.mts` tested with mocked SDK (integration tests in Phase 5).
 
@@ -232,11 +280,14 @@ node cursor-companion.mjs task "Refactor the auth module" --write --model compos
 - [ ] Create job via job-control
 - [ ] Create Cursor agent via cursor-agent
 - [ ] Send prompt with workspace context (branch, recent commits, changed files)
-- [ ] Stream events to stdout in real-time
+- [ ] Stream events to stdout in real-time (use `renderStreamEvent` over the
+      `AgentEvent` mapper from §2.1 — same shape as cookbook `runPlainPrompt`)
 - [ ] On completion: persist result, update job status
 - [ ] `--write` flag: allow file modifications (default: read-only analysis)
 - [ ] `--resume-last` flag: resume most recent agent session
 - [ ] `--background` flag: run in background, return job ID immediately
+- [ ] `--force` flag: pass `local.force` through (recover stuck local run)
+- [ ] `--cloud` flag: run on Cursor cloud against detected repo origin
 
 ### 3.3 `review` Subcommand
 
@@ -279,7 +330,10 @@ node cursor-companion.mjs setup
 - [ ] Check Node.js version (>= 18)
 - [ ] Check `@cursor/sdk` installed
 - [ ] Validate `CURSOR_API_KEY` — call `Cursor.me()` to verify auth
-- [ ] List available models via `Cursor.models.list()`
+- [ ] List available models via `Cursor.models.list()` — apply cookbook's
+      dedupe + variant-disambiguation (`dedupeModelChoices`,
+      `disambiguateDuplicateLabels`) so multi-variant models render as one
+      readable picker entry per concrete `ModelSelection`
 - [ ] Report readiness status
 
 ### 3.5 `status`, `result`, `cancel` Subcommands
