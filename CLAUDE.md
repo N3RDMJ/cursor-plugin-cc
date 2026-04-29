@@ -13,7 +13,8 @@ Requires `CURSOR_API_KEY` environment variable (Cursor subscription).
 - TypeScript + ESM (`.mts` source → `.mjs` output)
 - `@cursor/sdk` for programmatic Cursor agent interaction
 - Vitest for testing
-- ESLint for linting
+- Biome for linting + formatting
+- Husky for pre-commit checks (runs `biome check --staged`)
 - Conventional commits (`feat:`, `fix:`, `chore:`, etc.)
 
 ## Build & Test Commands
@@ -21,7 +22,10 @@ Requires `CURSOR_API_KEY` environment variable (Cursor subscription).
 ```bash
 npm run build          # tsc
 npm run typecheck      # tsc --noEmit
-npm run lint           # eslint
+npm run lint           # biome lint
+npm run format         # biome format --write
+npm run check          # biome check (lint + format, read-only)
+npm run check:fix      # biome check --write (lint + format, autofix)
 npm run test           # vitest run
 npm run test:watch     # vitest watch
 ```
