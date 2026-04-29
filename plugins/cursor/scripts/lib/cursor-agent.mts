@@ -12,12 +12,20 @@ import {
   type SDKModel,
   type SDKStatusMessage,
   type SDKUser,
+  type SendOptions,
   type SettingSource,
 } from "@cursor/sdk";
 
 export const DEFAULT_MODEL: ModelSelection = { id: "composer-2" };
 
 export type CursorAgentStatus = "finished" | "error" | "cancelled" | "expired";
+
+export type AgentMode = "local" | "cloud";
+
+export interface CloudRepo {
+  url: string;
+  startingRef?: string;
+}
 
 export interface ToolCallEvent {
   callId: string;
@@ -45,6 +53,10 @@ export interface CursorAgentOptions {
   mcpServers?: Record<string, McpServerConfig>;
   settingSources?: SettingSource[];
   name?: string;
+  /** Execution mode. Defaults to "local". */
+  mode?: AgentMode;
+  /** Required when mode === "cloud". */
+  cloudRepo?: CloudRepo;
 }
 
 export interface SendTaskOptions {
@@ -52,9 +64,20 @@ export interface SendTaskOptions {
   timeoutMs?: number;
   /** Invoked once for every SDKMessage emitted while the run streams. */
   onEvent?: (event: SDKMessage) => void;
+  /**
+   * Local-only: expire the agent's currently-active persisted run before
+   * starting this one. Recovery path when a previous CLI process crashed
+   * mid-run and left the agent wedged.
+   */
+  force?: boolean;
 }
 
 export type OneShotOptions = CursorAgentOptions & SendTaskOptions;
+
+export interface CancelResult {
+  cancelled: boolean;
+  reason?: string;
+}
 
 interface RequestOptions {
   apiKey?: string;
@@ -75,16 +98,59 @@ export function resolveApiKey(apiKey?: string): string {
   return resolved;
 }
 
+/**
+ * Default system instructions wrapped around user prompts via `buildPrompt`.
+ * Mirrors the pattern from cursor/cookbook coding-agent-cli — small framing
+ * that nudges the agent toward focused changes and concise progress.
+ */
+export const DEFAULT_AGENT_INSTRUCTIONS = [
+  "You are a coding agent invoked by Claude Code via the cursor-plugin-cc plugin.",
+  "Operate in the configured workspace.",
+  "Make focused, well-scoped changes; preserve unrelated user work.",
+  "Before changing files, understand the surrounding code.",
+  "Keep progress updates concise and summarize the result clearly at the end.",
+].join("\n");
+
+/**
+ * Wrap a user prompt with system instructions. Callers that need raw prompts
+ * (e.g. structured-output review) can skip this and pass the prompt directly
+ * to `sendTask`.
+ */
+export function buildPrompt(prompt: string, instructions?: string): string {
+  const sys = instructions ?? DEFAULT_AGENT_INSTRUCTIONS;
+  return `${sys}\n\nUser task:\n${prompt}`;
+}
+
 function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
+  const apiKey = resolveApiKey(opts.apiKey);
+  const model = opts.model ?? DEFAULT_MODEL;
+  const mode: AgentMode = opts.mode ?? "local";
+
+  const base: AgentOptions = {
+    apiKey,
+    model,
+    ...(opts.name ? { name: opts.name } : {}),
+    ...(opts.mcpServers ? { mcpServers: opts.mcpServers } : {}),
+  };
+
+  if (mode === "cloud") {
+    if (!opts.cloudRepo) {
+      throw new ConfigurationError(
+        "Cloud mode requires a cloudRepo (url, optional startingRef). " +
+          "Use detectCloudRepository() from lib/git.mts.",
+      );
+    }
+    const repo: { url: string; startingRef?: string } = { url: opts.cloudRepo.url };
+    if (opts.cloudRepo.startingRef) repo.startingRef = opts.cloudRepo.startingRef;
+    return { ...base, cloud: { repos: [repo] } };
+  }
+
   return {
-    apiKey: resolveApiKey(opts.apiKey),
-    model: opts.model ?? DEFAULT_MODEL,
+    ...base,
     local: {
       cwd: opts.cwd,
       ...(opts.settingSources ? { settingSources: opts.settingSources } : {}),
     },
-    ...(opts.name ? { name: opts.name } : {}),
-    ...(opts.mcpServers ? { mcpServers: opts.mcpServers } : {}),
   };
 }
 
@@ -106,7 +172,9 @@ export async function sendTask(
   prompt: string,
   options: SendTaskOptions = {},
 ): Promise<CursorRunResult> {
-  const run = await agent.send(prompt);
+  const run = options.force
+    ? await agent.send(prompt, { local: { force: true } } satisfies SendOptions)
+    : await agent.send(prompt);
   return collectRunResult(run, options);
 }
 
@@ -117,18 +185,33 @@ export async function sendTask(
  * signal to callers.
  */
 export async function oneShot(prompt: string, opts: OneShotOptions): Promise<CursorRunResult> {
-  const { timeoutMs, onEvent, ...agentOpts } = opts;
+  const { timeoutMs, onEvent, force, ...agentOpts } = opts;
   const agent = await createAgent(agentOpts);
   try {
     const sendOpts: SendTaskOptions = {};
     if (timeoutMs !== undefined) sendOpts.timeoutMs = timeoutMs;
     if (onEvent !== undefined) sendOpts.onEvent = onEvent;
+    if (force !== undefined) sendOpts.force = force;
     return await sendTask(agent, prompt, sendOpts);
   } finally {
     await disposeAgent(agent).catch(() => {
       /* dispose is best-effort; primary result is what callers care about */
     });
   }
+}
+
+/**
+ * Cancel a running operation, checking `run.supports("cancel")` first so the
+ * caller gets a clean reason instead of a thrown UnsupportedRunOperationError
+ * on agents that can't be cancelled.
+ */
+export async function cancelRun(run: Run): Promise<CancelResult> {
+  if (!run.supports("cancel")) {
+    const reason = run.unsupportedReason("cancel") ?? "This run cannot be cancelled.";
+    return { cancelled: false, reason };
+  }
+  await run.cancel();
+  return { cancelled: true };
 }
 
 export async function listArtifacts(agent: SDKAgent): Promise<SDKArtifact[]> {
@@ -171,6 +254,93 @@ export function normalizeStreamStatus(
   return status.toLowerCase() as CursorAgentStatus | "creating" | "running";
 }
 
+/**
+ * Flat representation of a stream event for terminal/UI consumers. One
+ * `SDKMessage` may produce 0+ `AgentEvent`s — assistant messages with
+ * multiple content blocks emit one per text/tool_use block.
+ */
+export type AgentEvent =
+  | { type: "assistant_text"; text: string }
+  | { type: "thinking"; text: string }
+  | {
+      type: "tool";
+      callId: string;
+      name: string;
+      status: "requested" | "running" | "completed" | "error";
+      args?: unknown;
+    }
+  | {
+      type: "status";
+      status: CursorAgentStatus | "creating" | "running";
+      message?: string;
+    }
+  | { type: "task"; status?: string; text?: string }
+  | { type: "system"; model?: ModelSelection; tools?: string[] };
+
+/**
+ * Map a single `SDKMessage` to flat `AgentEvent`s. Inspired by the cookbook's
+ * `emitSdkMessage`. Unknown event types are dropped (forward-compatible).
+ */
+export function toAgentEvents(message: SDKMessage): AgentEvent[] {
+  switch (message.type) {
+    case "assistant": {
+      const events: AgentEvent[] = [];
+      for (const block of message.message.content) {
+        if (block.type === "text") {
+          events.push({ type: "assistant_text", text: block.text });
+        } else {
+          events.push({
+            type: "tool",
+            callId: block.id,
+            name: block.name,
+            status: "requested",
+            args: block.input,
+          });
+        }
+      }
+      return events;
+    }
+    case "thinking":
+      return [{ type: "thinking", text: message.text }];
+    case "tool_call":
+      return [
+        {
+          type: "tool",
+          callId: message.call_id,
+          name: message.name,
+          status: message.status,
+          args: message.args,
+        },
+      ];
+    case "status":
+      return [
+        {
+          type: "status",
+          status: normalizeStreamStatus(message.status),
+          ...(message.message ? { message: message.message } : {}),
+        },
+      ];
+    case "task":
+      return [
+        {
+          type: "task",
+          ...(message.status ? { status: message.status } : {}),
+          ...(message.text ? { text: message.text } : {}),
+        },
+      ];
+    case "system":
+      return [
+        {
+          type: "system",
+          ...(message.model ? { model: message.model } : {}),
+          ...(message.tools ? { tools: message.tools } : {}),
+        },
+      ];
+    default:
+      return [];
+  }
+}
+
 async function collectRunResult(run: Run, options: SendTaskOptions): Promise<CursorRunResult> {
   const toolCalls = new Map<string, ToolCallEvent>();
   const textParts: string[] = [];
@@ -181,9 +351,11 @@ async function collectRunResult(run: Run, options: SendTaskOptions): Promise<Cur
     options.timeoutMs !== undefined && options.timeoutMs > 0
       ? setTimeout(() => {
           timedOut = true;
-          run.cancel().catch(() => {
-            /* run may already be terminal; swallow */
-          });
+          if (run.supports("cancel")) {
+            run.cancel().catch(() => {
+              /* run may already be terminal; swallow */
+            });
+          }
         }, options.timeoutMs)
       : undefined;
 

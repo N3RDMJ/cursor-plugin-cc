@@ -166,24 +166,24 @@ Key behaviors:
 - [x] Timeout handling: cancel run if it exceeds configurable timeout (`SendTaskOptions.timeoutMs`)
 - [x] Account helpers: `whoami` / `listModels` for `/cursor:setup`
 
-Follow-on items (from cookbook absorption — not yet implemented):
-- [ ] `buildPrompt(prompt, instructions?)` — wrap user prompt with default system
-      instructions (mirrors cookbook `AGENT_INSTRUCTIONS`). Make instructions
-      overridable per-call so `review` can supply its own.
-- [ ] Cloud execution mode: optional `mode: "local" | "cloud"` on
-      `CursorAgentOptions`; when `cloud`, pass `cloud: { repos: [...] }` to
-      `Agent.create`. Port `detectCloudRepository` + `normalizeGitHubRemote` to
-      `lib/git.mts` (§2.5) and consume from here.
-- [ ] `local.force` passthrough — surface a `force?: boolean` option that maps
-      to `local: { force: true }` so `task --force` can expire a stuck run.
-- [ ] Capability-checked cancel: replace bare `run.cancel()` in
-      `collectRunResult`'s timeout path with `run.supports("cancel")` /
-      `run.unsupportedReason("cancel")` and bubble the reason via `CursorRunResult`.
-- [ ] Token usage: include `usage?: { inputTokens?; outputTokens? }` on
-      `CursorRunResult` (read from `RunResult.usage`).
-- [ ] Export a public `AgentEvent` discriminated union + `toAgentEvent(SDKMessage)`
-      mapper (the cookbook's `emitSdkMessage` factored out) so render/CLI layers
-      consume a stable shape instead of raw `SDKMessage`.
+Follow-on items (from cookbook absorption):
+- [x] `buildPrompt(prompt, instructions?)` — wrap user prompt with default system
+      instructions (mirrors cookbook `AGENT_INSTRUCTIONS`). Instructions
+      overridable per-call.
+- [x] Cloud execution mode: optional `mode: "local" | "cloud"` + `cloudRepo`
+      on `CursorAgentOptions`; when `cloud`, pass `cloud: { repos: [...] }`
+      to `Agent.create`. `detectCloudRepository` lives in `lib/git.mts` (§2.5).
+- [x] `local.force` passthrough — `SendTaskOptions.force` maps to
+      `agent.send(prompt, { local: { force: true } })`.
+- [x] Capability-checked cancel: timeout path checks `run.supports("cancel")`
+      before calling cancel; `cancelRun(run)` helper exposes the
+      `{ cancelled, reason? }` result.
+- ~~Token usage on `CursorRunResult`~~ — `RunResult` does not expose `usage`
+      in the public type; the cookbook reads it via an unsafe cast. Skipped
+      to honor our "no `as any` / `@ts-ignore`" rule.
+- [x] Public `AgentEvent` discriminated union + `toAgentEvents(SDKMessage)`
+      mapper. One message can yield multiple events (assistant text +
+      tool_use blocks).
 
 ### 2.2 `lib/workspace.mts` — Workspace Resolution
 

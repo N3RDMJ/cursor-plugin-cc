@@ -32,7 +32,10 @@ vi.mock("@cursor/sdk", async () => {
 });
 
 import {
+  buildPrompt,
+  cancelRun,
   createAgent,
+  DEFAULT_AGENT_INSTRUCTIONS,
   DEFAULT_MODEL,
   disposeAgent,
   listModels,
@@ -41,6 +44,7 @@ import {
   resolveApiKey,
   resumeAgent,
   sendTask,
+  toAgentEvents,
   validateModel,
   whoami,
 } from "../../../plugins/cursor/scripts/lib/cursor-agent.mjs";
@@ -472,5 +476,127 @@ describe("Cursor account helpers", () => {
   it("validateModel throws ConfigurationError for an unknown model", async () => {
     sdkMocks.modelsList.mockResolvedValue([{ id: "composer-2", displayName: "Composer 2" }]);
     await expect(validateModel({ id: "imaginary" })).rejects.toThrow(/imaginary/);
+  });
+});
+
+describe("buildPrompt", () => {
+  it("wraps a user prompt with the default instructions", () => {
+    const out = buildPrompt("ship it");
+    expect(out.startsWith(DEFAULT_AGENT_INSTRUCTIONS)).toBe(true);
+    expect(out.endsWith("User task:\nship it")).toBe(true);
+  });
+
+  it("honors a custom instructions override", () => {
+    expect(buildPrompt("hi", "custom rules")).toBe("custom rules\n\nUser task:\nhi");
+  });
+});
+
+describe("toAgentEvents", () => {
+  it("emits one event per text/tool_use block from an assistant message", () => {
+    const events = toAgentEvents({
+      type: "assistant",
+      agent_id: "a",
+      run_id: "r",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "hello" },
+          { type: "tool_use", id: "u1", name: "edit", input: { path: "x" } },
+        ],
+      },
+    });
+    expect(events).toEqual([
+      { type: "assistant_text", text: "hello" },
+      { type: "tool", callId: "u1", name: "edit", status: "requested", args: { path: "x" } },
+    ]);
+  });
+
+  it("normalizes status messages into lowercase enum", () => {
+    const [event] = toAgentEvents({
+      type: "status",
+      agent_id: "a",
+      run_id: "r",
+      status: "FINISHED",
+      message: "done",
+    });
+    expect(event).toEqual({ type: "status", status: "finished", message: "done" });
+  });
+
+  it("drops unknown event types", () => {
+    expect(
+      toAgentEvents({
+        type: "user",
+        agent_id: "a",
+        run_id: "r",
+        message: { role: "user", content: [] },
+      }),
+    ).toEqual([]);
+    expect(
+      toAgentEvents({ type: "request", agent_id: "a", run_id: "r", request_id: "rq" }),
+    ).toEqual([]);
+  });
+});
+
+describe("cancelRun", () => {
+  it("returns cancelled=false with the SDK reason when the run does not support cancel", async () => {
+    const run = {
+      supports: (op: string) => op !== "cancel",
+      unsupportedReason: () => "completed runs cannot be cancelled",
+      cancel: vi.fn(),
+    } as unknown as Parameters<typeof cancelRun>[0];
+
+    const result = await cancelRun(run);
+    expect(result).toEqual({ cancelled: false, reason: "completed runs cannot be cancelled" });
+  });
+
+  it("calls run.cancel() when supported", async () => {
+    const cancel = vi.fn(async () => undefined);
+    const run = {
+      supports: () => true,
+      unsupportedReason: () => undefined,
+      cancel,
+    } as unknown as Parameters<typeof cancelRun>[0];
+
+    expect(await cancelRun(run)).toEqual({ cancelled: true });
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("cloud mode", () => {
+  it("createAgent forwards cloud.repos when mode='cloud' is set", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    await createAgent({
+      cwd: "/tmp/repo",
+      mode: "cloud",
+      cloudRepo: { url: "https://github.com/example/repo", startingRef: "main" },
+    });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.cloud).toEqual({
+      repos: [{ url: "https://github.com/example/repo", startingRef: "main" }],
+    });
+    expect(call?.local).toBeUndefined();
+  });
+
+  it("createAgent throws when mode='cloud' is set without a cloudRepo", async () => {
+    await expect(createAgent({ cwd: "/tmp/repo", mode: "cloud" })).rejects.toThrow(/cloudRepo/);
+  });
+});
+
+describe("sendTask force flag", () => {
+  it("passes local.force=true to agent.send when options.force is set", async () => {
+    const run = makeRun([], { id: "r-force", status: "finished" });
+    const agent = fakeAgent(run);
+    await sendTask(agent, "go", { force: true });
+    expect(agent.send).toHaveBeenCalledWith("go", { local: { force: true } });
+  });
+
+  it("omits options when force is not set", async () => {
+    const run = makeRun([], { id: "r-noforce", status: "finished" });
+    const agent = fakeAgent(run);
+    await sendTask(agent, "go");
+    expect(agent.send).toHaveBeenCalledWith("go");
   });
 });
