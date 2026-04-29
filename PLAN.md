@@ -207,14 +207,20 @@ Job and session state persisted to disk.
 
 ### 2.4 `lib/job-control.mts` — Job CRUD
 
-- [ ] `createJob(type, prompt)` → jobId
-- [ ] `updateJobStatus(jobId, status, result?)` — pending → running → completed/failed/cancelled
-- [ ] `getJob(jobId)` → full job state
-- [ ] `listJobs(filter?)` → summary table
-- [ ] `cancelJob(jobId)` — uses the capability-checked cancel path from §2.1
-      (returns `{ cancelled: false, reason }` when `run.supports("cancel")` is false)
-- [ ] Background job tracking: maintain in-memory map of active runs for cancellation
-- [ ] Job types: `task`, `review`, `adversarial-review`
+- [x] `createJob(input)` → JobRecord (returns full record, not just id)
+- [x] State transitions: `markRunning` / `markFinished` / `markFailed` /
+      `markCancelled`. `markFinished` maps CursorAgentStatus → JobStatus
+      (`finished`→`completed`, `error`→`failed`, `expired`→`cancelled`+meta).
+- [x] `getJob(jobId)` → full job state
+- [x] `listJobs(filter?)` with type/status/limit filters
+- [x] `cancelJob(jobId)` — capability-checked via `cancelRun` from §2.1
+      (returns `{ cancelled, reason?, job? }` so callers can render a clean
+      diagnostic). Marks pending+no-active-run as cancelled with
+      reason="run-not-active".
+- [x] Background job tracking: in-process `activeRuns` map keyed by jobId
+      (`registerActiveRun` / `unregisterActiveRun` / `getActiveRun`).
+- [x] Job types: `task`, `review`, `adversarial-review` (id prefix `adv-`).
+- [x] `logJobLine` helper appends to per-job log file.
 
 ### 2.5 `lib/git.mts` — Git Helpers
 
