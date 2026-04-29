@@ -56,6 +56,7 @@ export interface SendTaskOptions {
 
 export interface OneShotOptions extends CursorAgentOptions {
   timeoutMs?: number;
+  onEvent?: (event: SDKMessage) => void;
 }
 
 interface RequestOptions {
@@ -81,11 +82,11 @@ function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
   return {
     apiKey: resolveApiKey(opts.apiKey),
     model: opts.model ?? DEFAULT_MODEL,
-    name: opts.name,
     local: {
       cwd: opts.cwd,
       ...(opts.settingSources ? { settingSources: opts.settingSources } : {}),
     },
+    ...(opts.name ? { name: opts.name } : {}),
     ...(opts.mcpServers ? { mcpServers: opts.mcpServers } : {}),
   };
 }
@@ -102,10 +103,6 @@ export async function disposeAgent(agent: SDKAgent): Promise<void> {
   await agent[Symbol.asyncDispose]();
 }
 
-export function streamEvents(run: Run): AsyncGenerator<SDKMessage, void> {
-  return run.stream();
-}
-
 /** Send a prompt, stream events, and resolve to a normalized result. */
 export async function sendTask(
   agent: SDKAgent,
@@ -116,19 +113,25 @@ export async function sendTask(
   return collectRunResult(run, options);
 }
 
-/** One-shot helper: create + send + close. Mirrors Agent.prompt(). */
+/**
+ * One-shot helper: create + send + dispose. Built on the same pipeline as
+ * `sendTask` so streaming, tool-call aggregation, and timeoutMs all apply.
+ * Disposal failures are swallowed so the run's result remains the primary
+ * signal to callers.
+ */
 export async function oneShot(prompt: string, opts: OneShotOptions): Promise<CursorRunResult> {
-  const { timeoutMs: _timeoutMs, ...agentOpts } = opts;
-  const agentOptions = buildAgentOptions(agentOpts);
-  const result = await Agent.prompt(prompt, agentOptions);
-  return {
-    status: normalizeRunResultStatus(result.status),
-    output: result.result ?? "",
-    toolCalls: [],
-    agentId: "",
-    runId: result.id,
-    durationMs: result.durationMs,
-  };
+  const { timeoutMs, onEvent, ...agentOpts } = opts;
+  const agent = await createAgent(agentOpts);
+  try {
+    const sendOpts: SendTaskOptions = {};
+    if (timeoutMs !== undefined) sendOpts.timeoutMs = timeoutMs;
+    if (onEvent !== undefined) sendOpts.onEvent = onEvent;
+    return await sendTask(agent, prompt, sendOpts);
+  } finally {
+    await disposeAgent(agent).catch(() => {
+      /* dispose is best-effort; primary result is what callers care about */
+    });
+  }
 }
 
 export async function listArtifacts(agent: SDKAgent): Promise<SDKArtifact[]> {
@@ -171,10 +174,6 @@ export function normalizeStreamStatus(
   return status.toLowerCase() as CursorAgentStatus | "creating" | "running";
 }
 
-function normalizeRunResultStatus(status: "finished" | "error" | "cancelled"): CursorAgentStatus {
-  return status;
-}
-
 async function collectRunResult(run: Run, options: SendTaskOptions): Promise<CursorRunResult> {
   const toolCalls = new Map<string, ToolCallEvent>();
   const textParts: string[] = [];
@@ -210,7 +209,7 @@ async function collectRunResult(run: Run, options: SendTaskOptions): Promise<Cur
     const result = await run.wait();
     const status: CursorAgentStatus = timedOut
       ? "cancelled"
-      : (observedTerminalStatus ?? normalizeRunResultStatus(result.status));
+      : (observedTerminalStatus ?? result.status);
     return {
       status,
       output: result.result ?? textParts.join(""),

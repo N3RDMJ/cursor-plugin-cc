@@ -12,7 +12,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
   agentResume: vi.fn(),
-  agentPrompt: vi.fn(),
   cursorMe: vi.fn(),
   modelsList: vi.fn(),
 }));
@@ -24,7 +23,6 @@ vi.mock("@cursor/sdk", async () => {
     Agent: {
       create: sdkMocks.agentCreate,
       resume: sdkMocks.agentResume,
-      prompt: sdkMocks.agentPrompt,
     },
     Cursor: {
       me: sdkMocks.cursorMe,
@@ -172,6 +170,29 @@ describe("createAgent / resumeAgent", () => {
     const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
     expect(call?.model).toEqual({ id: "gpt-5" });
     expect(call?.local).toEqual({ cwd: "/tmp/repo", settingSources: ["project", "user"] });
+  });
+
+  it("createAgent forwards mcpServers", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    await createAgent({
+      cwd: "/tmp/repo",
+      mcpServers: { fs: { command: "mcp-fs" } },
+    });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.mcpServers).toEqual({ fs: { command: "mcp-fs" } });
+  });
+
+  it("createAgent omits 'name' when not provided", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    await createAgent({ cwd: "/tmp/repo" });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call).not.toHaveProperty("name");
   });
 
   it("resumeAgent passes the agentId through", async () => {
@@ -335,31 +356,91 @@ describe("sendTask", () => {
 });
 
 describe("oneShot", () => {
-  it("calls Agent.prompt and normalizes the result", async () => {
-    const sdkResult: RunResult = {
-      id: "run-5",
-      status: "finished",
-      result: "done",
-      durationMs: 5,
-    };
-    sdkMocks.agentPrompt.mockResolvedValue(sdkResult);
+  it("creates an agent, runs the prompt, and disposes the agent", async () => {
+    const events: SDKMessage[] = [
+      {
+        type: "assistant",
+        agent_id: "agent-test",
+        run_id: "run-5",
+        message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+      },
+    ];
+    const run = makeRun(events, { id: "run-5", status: "finished", durationMs: 5 });
+    const fake = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(fake);
 
     const result = await oneShot("ping", { cwd: "/tmp/repo" });
 
-    expect(sdkMocks.agentPrompt).toHaveBeenCalledWith(
-      "ping",
+    expect(sdkMocks.agentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         apiKey: "test-key",
         model: DEFAULT_MODEL,
         local: { cwd: "/tmp/repo" },
       }),
     );
+    expect(fake.send).toHaveBeenCalledWith("ping");
+    expect(fake[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       status: "finished",
       output: "done",
+      agentId: "agent-test",
       runId: "run-5",
       durationMs: 5,
     });
+  });
+
+  it("disposes the agent even when the run errors", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r", status: "finished" }));
+    fake.send = vi.fn(async () => {
+      throw new Error("send-blew-up");
+    });
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    await expect(oneShot("ping", { cwd: "/tmp/repo" })).rejects.toThrow("send-blew-up");
+    expect(fake[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors timeoutMs and reports cancellation", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slowEvents: SDKMessage[] = [];
+    async function* slowStream(): AsyncGenerator<SDKMessage, void> {
+      await blocker;
+      for (const e of slowEvents) yield e;
+    }
+    const run: Run = {
+      id: "run-6",
+      agentId: "agent-test",
+      status: "running",
+      result: undefined,
+      model: undefined,
+      durationMs: undefined,
+      git: undefined,
+      supports: () => true,
+      unsupportedReason: () => undefined,
+      stream: slowStream,
+      conversation: async () => [],
+      wait: async () => ({ id: "run-6", status: "cancelled" }),
+      cancel: vi.fn(async () => {
+        release();
+      }),
+      onDidChangeStatus: () => () => undefined,
+    };
+    const fake = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    const promise = oneShot("ping", { cwd: "/tmp/repo", timeoutMs: 10 });
+    await vi.advanceTimersByTimeAsync(20);
+    const result = await promise;
+    vi.useRealTimers();
+
+    expect(run.cancel).toHaveBeenCalled();
+    expect(result.status).toBe("cancelled");
+    expect(result.timedOut).toBe(true);
+    expect(fake[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
   });
 });
 

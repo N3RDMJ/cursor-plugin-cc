@@ -130,8 +130,9 @@ interface CursorRunResult {
 Key behaviors:
 - [x] `createAgent(opts)` — `await Agent.create(...)` (async), validate API key
 - [x] `sendTask(agent, prompt)` — send prompt, stream events, aggregate output
-- [x] `streamEvents(run)` — async generator over `SDKMessage` (8 variants:
-      `system | user | assistant | thinking | tool_call | status | task | request`)
+- ~~`streamEvents(run)` — async generator over `SDKMessage` (8 variants:
+      `system | user | assistant | thinking | tool_call | status | task | request`)~~
+      Dropped: a thin re-export added no value over `Run.stream()` directly. Callers that need raw events use the SDK iterator; consumers that want aggregated text/tool calls use `sendTask`.
 - [x] `resumeAgent(agentId, opts)` — `await Agent.resume(...)` (async)
 - [x] `oneShot(prompt, opts)` — thin wrapper over `Agent.prompt()` for setup
       smoke test and short stateless calls (review can use this)
