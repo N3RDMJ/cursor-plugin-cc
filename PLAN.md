@@ -128,22 +128,23 @@ interface CursorRunResult {
 ```
 
 Key behaviors:
-- [ ] `createAgent(opts)` — `await Agent.create(...)` (async), validate API key
-- [ ] `sendTask(agent, prompt)` — send prompt, stream events, aggregate output
-- [ ] `streamEvents(run)` — async generator over `SDKMessage` (8 variants:
+- [x] `createAgent(opts)` — `await Agent.create(...)` (async), validate API key
+- [x] `sendTask(agent, prompt)` — send prompt, stream events, aggregate output
+- [x] `streamEvents(run)` — async generator over `SDKMessage` (8 variants:
       `system | user | assistant | thinking | tool_call | status | task | request`)
-- [ ] `resumeAgent(agentId, opts)` — `await Agent.resume(...)` (async)
-- [ ] `oneShot(prompt, opts)` — thin wrapper over `Agent.prompt()` for setup
+- [x] `resumeAgent(agentId, opts)` — `await Agent.resume(...)` (async)
+- [x] `oneShot(prompt, opts)` — thin wrapper over `Agent.prompt()` for setup
       smoke test and short stateless calls (review can use this)
-- [ ] `disposeAgent(agent)` — `await agent[Symbol.asyncDispose]()`
-- [ ] `listArtifacts(agent)` / `downloadArtifact(agent, path)` — expose SDK
+- [x] `disposeAgent(agent)` — `await agent[Symbol.asyncDispose]()`
+- [x] `listArtifacts(agent)` / `downloadArtifact(agent, path)` — expose SDK
       artifact API for `/cursor:result` to retrieve generated files
-- [ ] Status normalization: SDK `RunResult.status` is lowercase; status-message
+- [x] Status normalization: SDK `RunResult.status` is lowercase; status-message
       stream uses uppercase + extra `EXPIRED` state — wrapper presents one
-      consistent enum to callers
-- [ ] API key validation: check `CURSOR_API_KEY` env var, clear error message if missing
-- [ ] Model validation: call `Cursor.models.list()` to verify model exists
-- [ ] Timeout handling: cancel run if it exceeds configurable timeout
+      consistent enum to callers (`normalizeStreamStatus`)
+- [x] API key validation: check `CURSOR_API_KEY` env var, clear error message if missing (`resolveApiKey`)
+- [x] Model validation: call `Cursor.models.list()` to verify model exists (`validateModel`)
+- [x] Timeout handling: cancel run if it exceeds configurable timeout (`SendTaskOptions.timeoutMs`)
+- [x] Account helpers: `whoami` / `listModels` for `/cursor:setup`
 
 ### 2.2 `lib/workspace.mts` — Workspace Resolution
 
