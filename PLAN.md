@@ -231,16 +231,17 @@ Job and session state persisted to disk.
 
 ### 2.6 `lib/render.mts` — Terminal Output
 
-- [ ] `renderJobTable(jobs)` — formatted table of jobs with status, type, elapsed time
-- [ ] `renderStreamEvent(event)` — format a single `AgentEvent` (the flat shape
-      from §2.1) for terminal display. Mirrors cookbook `renderPlainEvent`:
-      assistant text → stdout; thinking/tool/status/task → annotated stderr lines.
-- [ ] `renderReviewResult(review)` — format structured review output with severity colors
-- [ ] `renderError(error)` — consistent error formatting
-- [ ] `formatDuration(ms)` — small helper, lifted from cookbook
-- [ ] `summarizeToolArgs(toolName, args)` — concise one-line tool-call summary
-      (port the keyed-lookup table from cookbook `getToolSummaryKeys` —
-      read/glob/grep/shell/edit each get their own preferred argument keys).
+- [x] `renderJobTable(jobs)` — aligned text table with derived ages
+- [x] `renderStreamEvent(event)` — format a single `AgentEvent` (the flat
+      shape from §2.1) for terminal display. Mirrors cookbook
+      `renderPlainEvent`: assistant text → stdout; thinking/tool/status/task
+      → annotated stderr lines. Returns `{stdout?, stderr?}` so the caller
+      controls actual writes (testable).
+- [x] `renderReviewResult(review)` — verdict, sorted findings, next steps
+- [x] `renderError(error)` — consistent error formatting
+- [x] `formatDuration(ms)` — lifted from cookbook
+- [x] `summarizeToolArgs(toolName, args)` — keyed-lookup table for
+      read/glob/grep/shell/edit, ported from cookbook `getToolSummaryKeys`.
 
 **Exit criteria**: Unit tests for each module. `cursor-agent.mts` tested with mocked SDK (integration tests in Phase 5).
 
