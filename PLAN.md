@@ -11,17 +11,17 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
 - [x] `git init`
 - [x] Create `.gitignore` (node_modules, dist, .env, CLAUDE.local.md, *.log)
 - [x] `npm init` with correct metadata (name: `cursor-plugin-cc`, license, repo URL)
-- [ ] Install dependencies:
-  - `@cursor/sdk` — Cursor agent SDK
-  - `typescript` — compiler (dev)
-  - `vitest` — test runner (dev)
+- [x] Install dependencies:
+  - [x] `@cursor/sdk` — Cursor agent SDK
+  - [x] `typescript` — compiler (dev)
+  - [x] `vitest` — test runner (dev)
   - ~~`eslint` + `@typescript-eslint/*`~~ → replaced by `@biomejs/biome` (installed)
-  - `tsup` or plain `tsc` — build (dev)
+  - [x] `tsc` — build (dev) (chose plain `tsc` over `tsup`; no bundling needed)
 
 ### 1.2 TypeScript Config
-- [ ] `tsconfig.json`: target ES2022, module NodeNext, strict, outDir `dist/`
-- [ ] Source in `plugins/cursor/scripts/` → compiled to `plugins/cursor/scripts/dist/`
-- [ ] Separate `tsconfig.build.json` if needed (exclude tests)
+- [x] `tsconfig.json`: target ES2022, module NodeNext, strict (typecheck-only, `noEmit`)
+- [x] Source in `plugins/cursor/scripts/` → compiled to `plugins/cursor/scripts/dist/`
+- [x] Separate `tsconfig.build.json` (sets `outDir`/`rootDir`, excludes tests)
 
 ### 1.3 Lint Config (Biome, replacing ESLint)
 - [x] `biome.json` with lint + format rules (replaces `eslint.config.mjs`)
@@ -29,19 +29,19 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
 - [x] Husky pre-commit runs `biome check --staged`
 
 ### 1.4 Package Scripts
+- [x] `build`, `typecheck`, `test`, `test:watch` wired up; `lint`/`format`/`check`/`check:fix` via Biome
 ```json
 {
   "build": "tsc -p tsconfig.build.json",
   "typecheck": "tsc --noEmit",
-  "lint": "eslint .",
+  "lint": "biome lint .",
   "test": "vitest run",
-  "test:watch": "vitest",
-  "prepublishOnly": "npm run build"
+  "test:watch": "vitest"
 }
 ```
 
 ### 1.5 Plugin Manifest
-- [ ] `.claude-plugin/plugin.json`:
+- [x] `plugins/cursor/.claude-plugin/plugin.json`:
   ```json
   {
     "name": "cursor",
@@ -50,7 +50,7 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
     "author": { "name": "cursor-plugin-cc" }
   }
   ```
-- [ ] `.claude-plugin/marketplace.json` (top-level, for plugin registry):
+- [x] `.claude-plugin/marketplace.json` (top-level, for plugin registry):
   ```json
   {
     "name": "cursor-plugin-cc",
@@ -70,6 +70,8 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
   ```
 
 ### 1.6 Directory Skeleton
+- [x] Skeleton scaffolded with stubs for `cursor-companion.mts` and `session-lifecycle-hook.mts`
+- [x] `vitest.config.mts` + smoke test in `tests/unit/scaffold.test.mts`
 ```
 plugins/cursor/
 ├── .claude-plugin/plugin.json
@@ -84,7 +86,7 @@ plugins/cursor/
 └── package.json
 ```
 
-**Exit criteria**: `npm run build` succeeds, `npm run lint` passes, `npm test` runs (even if no tests yet).
+**Exit criteria**: `npm run build` succeeds, `npm run check` passes, `npm test` runs. ✅ (all green as of Phase 1 completion)
 
 ---
 
