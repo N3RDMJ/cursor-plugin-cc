@@ -423,14 +423,18 @@ Behavior:
 
 ### 5.1 Unit Tests (`tests/unit/`)
 
-| Module | Test Coverage |
-|--------|--------------|
-| `lib/workspace.mts` | Git root resolution, workspace ID generation, edge cases (no git, nested repos) |
-| `lib/state.mts` | Read/write/prune jobs, atomic writes, corruption recovery |
-| `lib/job-control.mts` | Job lifecycle (create → running → completed/failed/cancelled), listing, filtering |
-| `lib/git.mts` | Diff parsing, status parsing, empty repo handling |
-| `lib/render.mts` | Table formatting, event rendering, review formatting |
-| `lib/args.mts` | Argument parsing, flag extraction, validation |
+| Module | Test Coverage | Status |
+|--------|---------------|--------|
+| `lib/workspace.mts` | Git root resolution, workspace ID generation, edge cases (no git, nested repos) | ✅ |
+| `lib/state.mts` | Read/write/prune jobs, atomic writes, corruption recovery | ✅ |
+| `lib/job-control.mts` | Job lifecycle (create → running → completed/failed/cancelled), listing, filtering | ✅ |
+| `lib/git.mts` | Diff parsing, status parsing, empty repo handling, GitHub remote normalization | ✅ |
+| `lib/render.mts` | Table formatting, event rendering, review formatting, tool-arg summarizer | ✅ |
+| `lib/args.mts` | Argument parsing, flag extraction, validation | ✅ |
+| `lib/cursor-agent.mts` | Mocked SDK: createAgent / sendTask / oneShot / cancel / cloud-mode / force / AgentEvent mapper | ✅ |
+| `commands/review.mts` | JSON extraction (fence-stripping), shape validation | ✅ |
+| `cursor-companion.mts` | Router smoke (help, unknown, status empty, --help, missing-id, setup-no-key) | ✅ |
+| `session-lifecycle-hook.mts` | SessionStart writes session.json, SessionEnd clears it | ✅ |
 
 ### 5.2 Integration Tests (`tests/integration/`)
 

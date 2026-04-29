@@ -117,14 +117,14 @@ function buildReviewPrompt(diff: string, status: string, instructions: string): 
  * Tolerant JSON extraction: agents sometimes wrap output in ```json fences
  * despite instructions. Strip surrounding fences before parsing.
  */
-function extractJson(raw: string): string {
+export function extractJson(raw: string): string {
   const trimmed = raw.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   if (fenced) return fenced[1] ?? trimmed;
   return trimmed;
 }
 
-function parseReview(raw: string): ReviewOutput {
+export function parseReview(raw: string): ReviewOutput {
   const text = extractJson(raw);
   let parsed: unknown;
   try {
