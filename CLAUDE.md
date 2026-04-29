@@ -50,25 +50,46 @@ plugins/cursor/
 
 ## @cursor/sdk Key Patterns
 
-```typescript
-import { Agent } from "@cursor/sdk/agent";
+Verified against `@cursor/sdk@1.0.9` (public beta).
 
-// Create local agent scoped to working directory
-const agent = Agent.create({
-  apiKey: process.env.CURSOR_API_KEY!,
-  model: { id: "composer-2" },
+```typescript
+import { Agent, Cursor } from "@cursor/sdk";
+import type { SDKMessage, ModelSelection } from "@cursor/sdk";
+
+// Agent.create / Agent.resume / Agent.prompt are all async — must await.
+const agent = await Agent.create({
+  apiKey: process.env.CURSOR_API_KEY,
+  model: { id: "composer-2" } satisfies ModelSelection,
   local: { cwd: "/path/to/repo" },
 });
 
-// Send prompt and stream results
 const run = await agent.send("task description");
 for await (const event of run.stream()) {
-  // event.type: "assistant" | "thinking" | "tool_call" | "status" | "task"
+  // event is SDKMessage — discriminated union of 8 variants:
+  // "system" | "user" | "assistant" | "thinking" | "tool_call"
+  //   | "status" | "task" | "request"
 }
 
-// Resume durable agent by ID
-const resumed = Agent.resume("agent-<uuid>", { ...opts });
+const result = await run.wait();   // RunResult: { status, result?, durationMs?, ... }
+// status is lowercase: "finished" | "error" | "cancelled"
+
+// Resume durable agent by ID (also async).
+const resumed = await Agent.resume("agent-<uuid>", { local: { cwd } });
+
+// One-shot helper: create + send + close, returns RunResult.
+const oneShot = await Agent.prompt("ping", { apiKey, model, local: { cwd } });
+
+// Account / catalog operations (used by /cursor:setup):
+await Cursor.me();              // verifies CURSOR_API_KEY
+await Cursor.models.list();     // discovers valid ModelSelection ids
+
+// Cleanup: agents implement Symbol.asyncDispose.
+await agent[Symbol.asyncDispose]();
 ```
+
+Status messages from `run.stream()` use uppercase + an extra `EXPIRED` state:
+`"CREATING" | "RUNNING" | "FINISHED" | "ERROR" | "CANCELLED" | "EXPIRED"`.
+The wrapper in `lib/cursor-agent.mts` normalizes these.
 
 ## Conventions
 

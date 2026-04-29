@@ -103,27 +103,41 @@ Wraps `@cursor/sdk` Agent with project-specific defaults and error handling.
 // - Cleanup/dispose agents
 // - Structured output support (for reviews)
 
+import type { ModelSelection, McpServerConfig } from "@cursor/sdk";
+
 interface CursorAgentOptions {
   cwd: string;
   apiKey: string;
-  model?: string;          // default: "composer-2"
+  model?: ModelSelection;   // default: { id: "composer-2" }
   mcpServers?: Record<string, McpServerConfig>;
+  settingSources?: Array<"project" | "user" | "team" | "mdm" | "plugins">;
 }
 
 interface CursorRunResult {
-  status: "FINISHED" | "ERROR";
+  // Mirrors SDK RunResult.status (lowercase) + "expired" for stale local runs
+  // surfaced via SDKStatusMessage.
+  status: "finished" | "error" | "cancelled" | "expired";
   output: string;           // aggregated text output
   toolCalls: ToolCallEvent[];
   agentId: string;          // for resume
+  durationMs?: number;
 }
 ```
 
 Key behaviors:
-- [ ] `createAgent(opts)` — create local agent, validate API key
+- [ ] `createAgent(opts)` — `await Agent.create(...)` (async), validate API key
 - [ ] `sendTask(agent, prompt)` — send prompt, stream events, aggregate output
-- [ ] `streamEvents(run)` — async generator yielding typed events for real-time display
-- [ ] `resumeAgent(agentId, opts)` — resume durable session
-- [ ] `disposeAgent(agent)` — cleanup resources
+- [ ] `streamEvents(run)` — async generator over `SDKMessage` (8 variants:
+      `system | user | assistant | thinking | tool_call | status | task | request`)
+- [ ] `resumeAgent(agentId, opts)` — `await Agent.resume(...)` (async)
+- [ ] `oneShot(prompt, opts)` — thin wrapper over `Agent.prompt()` for setup
+      smoke test and short stateless calls (review can use this)
+- [ ] `disposeAgent(agent)` — `await agent[Symbol.asyncDispose]()`
+- [ ] `listArtifacts(agent)` / `downloadArtifact(agent, path)` — expose SDK
+      artifact API for `/cursor:result` to retrieve generated files
+- [ ] Status normalization: SDK `RunResult.status` is lowercase; status-message
+      stream uses uppercase + extra `EXPIRED` state — wrapper presents one
+      consistent enum to callers
 - [ ] API key validation: check `CURSOR_API_KEY` env var, clear error message if missing
 - [ ] Model validation: call `Cursor.models.list()` to verify model exists
 - [ ] Timeout handling: cancel run if it exceeds configurable timeout
