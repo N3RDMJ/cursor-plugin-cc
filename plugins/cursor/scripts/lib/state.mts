@@ -105,11 +105,32 @@ export function getStateIndexPath(stateDir: string): string {
   return path.join(stateDir, "state.json");
 }
 
+/**
+ * Reject job ids that would let `path.join(stateDir, id)` escape the state
+ * directory. The CLI surfaces ids from user input (`/cursor:result <id>`,
+ * `/cursor:cancel <id>`), so this is the boundary where untrusted strings
+ * become file paths — validating here keeps callers from having to remember.
+ */
+function assertSafeJobId(jobId: string): void {
+  if (
+    jobId.length === 0 ||
+    jobId.includes("/") ||
+    jobId.includes("\\") ||
+    jobId.includes("\0") ||
+    jobId === "." ||
+    jobId === ".."
+  ) {
+    throw new Error(`invalid jobId: ${JSON.stringify(jobId)}`);
+  }
+}
+
 export function getJobJsonPath(stateDir: string, jobId: string): string {
+  assertSafeJobId(jobId);
   return path.join(stateDir, `${jobId}.json`);
 }
 
 export function getJobLogPath(stateDir: string, jobId: string): string {
+  assertSafeJobId(jobId);
   return path.join(stateDir, `${jobId}.log`);
 }
 
@@ -204,13 +225,14 @@ export function pruneJobIndex(
   stateDir: string,
   maxEntries: number = DEFAULT_MAX_JOBS,
 ): PruneResult {
+  const limit = Math.max(0, Math.floor(maxEntries));
   const index = readStateIndex(stateDir);
-  if (index.jobs.length <= maxEntries) {
+  if (index.jobs.length <= limit) {
     return { removed: [], kept: index.jobs.length };
   }
   const sorted = [...index.jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const kept = sorted.slice(0, maxEntries);
-  const dropped = sorted.slice(maxEntries);
+  const kept = sorted.slice(0, limit);
+  const dropped = sorted.slice(limit);
   for (const job of dropped) {
     fs.rmSync(getJobJsonPath(stateDir, job.id), { force: true });
     fs.rmSync(getJobLogPath(stateDir, job.id), { force: true });

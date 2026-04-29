@@ -321,6 +321,47 @@ describe("path helpers", () => {
     expect(getJobLogPath(dir, "abc")).toBe("/tmp/state/abc.log");
     expect(getSessionPath(dir)).toBe("/tmp/state/session.json");
   });
+
+  it.each([
+    ["empty", ""],
+    ["dot", "."],
+    ["dotdot", ".."],
+    ["forward slash", "../etc/passwd"],
+    ["nested forward slash", "foo/bar"],
+    ["backslash", "foo\\bar"],
+    ["nul byte", "foo\0bar"],
+  ])("rejects unsafe jobId (%s)", (_label, jobId) => {
+    expect(() => getJobJsonPath("/tmp/state", jobId)).toThrow(/invalid jobId/);
+    expect(() => getJobLogPath("/tmp/state", jobId)).toThrow(/invalid jobId/);
+  });
+
+  it("accepts safe jobIds with hyphens, underscores, and dots", () => {
+    expect(() => getJobJsonPath("/tmp/state", "job-2026-04-29_a1b2.x")).not.toThrow();
+  });
+});
+
+describe("pruneJobIndex edge cases", () => {
+  let stateDir: string;
+
+  beforeEach(() => {
+    stateDir = path.join(makeTmpDir("cursor-plugin-state-"), "ws");
+  });
+
+  afterEach(() => {
+    rmSync(path.dirname(stateDir), { recursive: true, force: true });
+  });
+
+  it("treats negative or fractional limits as zero", () => {
+    const jobs: JobIndexEntry[] = [
+      entry("a", "2026-01-01T00:00:00Z"),
+      entry("b", "2026-01-02T00:00:00Z"),
+    ];
+    writeStateIndex(stateDir, { version: 1, jobs });
+    const result = pruneJobIndex(stateDir, -5);
+    expect(result.kept).toBe(0);
+    expect(new Set(result.removed)).toEqual(new Set(["a", "b"]));
+    expect(readStateIndex(stateDir).jobs).toEqual([]);
+  });
 });
 
 function readDirRecursive(dir: string): string[] {
