@@ -377,18 +377,18 @@ Each file in `commands/` is a prompt document Claude reads when the user invokes
 | `result.md` | `/cursor:result <job-id>` | Retrieve job output |
 | `cancel.md` | `/cursor:cancel <job-id>` | Cancel active job |
 
-For commands that just shell out: `disable-model-invocation: true` + `allowed-tools: Bash(node:*)`.
+For commands that just shell out: `disable-model-invocation: true` + `allowed-tools: Bash(node:*)`. ✅ All seven slash command markdown files implemented.
 
 ### 4.2 Subagent: `cursor-rescue`
 
 `agents/cursor-rescue.md` — named subagent invoked via `Agent` tool with `subagent_type: "cursor:cursor-rescue"`.
 
 Behavior:
-- Receives a prompt (the hard problem)
-- Builds one shell command: `node cursor-companion.mjs task "<prompt>" --write`
-- Executes via Bash, returns stdout unchanged
-- Never orchestrates, never inspects files itself
-- Supports `$ARGUMENTS` for user input
+- [x] Receives a prompt (the hard problem)
+- [x] Builds one shell command: `node cursor-companion.mjs task "<prompt>" --write`
+- [x] Executes via Bash, returns stdout unchanged
+- [x] Never orchestrates, never inspects files itself
+- [x] Supports `$ARGUMENTS` for user input
 
 ### 4.3 Hooks
 
@@ -400,16 +400,20 @@ Behavior:
 | Session end | `SessionEnd` | `session-lifecycle-hook.mjs SessionEnd` | 5s |
 
 `session-lifecycle-hook.mts`:
-- **SessionStart**: Read session ID from stdin JSON. Write session metadata to state dir. Export env vars (`CURSOR_SESSION_ID`, `CURSOR_PLUGIN_ROOT`).
-- **SessionEnd**: Read active agent IDs from session state. Dispose each via `agent[Symbol.asyncDispose]()`. Clean up temp files. Update session state.
+- [x] **SessionStart**: read session id from stdin JSON, write session
+      metadata into state dir
+- [x] **SessionEnd**: clear the session marker. Agents are not disposed
+      because background runs may still be using them — disposal is the
+      caller's responsibility, and the SDK manages durable agent lifecycle.
+      A future enhancement could iterate `agentIds` and dispose any that
+      are still attached.
 
-### 4.4 Skills (Already Created in /init)
+### 4.4 Skills
 
-- `cursor-rescue` — delegation instructions
-- `cursor-result-handling` — output presentation rules
-
-Additional skill to create:
-- [ ] `cursor-prompting/SKILL.md` — how to compose effective prompts for Cursor agent (task structure, context inclusion, structured output contracts)
+- [x] `cursor-rescue/SKILL.md` — when to delegate, what to include
+- [x] `cursor-result-handling/SKILL.md` — output presentation rules
+- [x] `cursor-prompting/SKILL.md` — task structure, `--write` policy,
+      structured-output contracts
 
 **Exit criteria**: Install plugin locally (`/plugin install /path/to/cursor-plugin-cc`), all slash commands appear, `/cursor:setup` works.
 
