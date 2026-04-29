@@ -4,7 +4,8 @@
     "noEmit": false,
     "outDir": "plugins/cursor/scripts/dist",
     "rootDir": "plugins/cursor/scripts",
-    "declaration": false
+    "declaration": false,
+    "sourceMap": false
   },
   "include": ["plugins/cursor/scripts/**/*.mts"],
   "exclude": ["node_modules", "**/dist/**", "**/*.test.mts", "tests/**"]
