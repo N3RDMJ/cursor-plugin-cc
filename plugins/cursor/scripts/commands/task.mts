@@ -19,6 +19,8 @@ import {
   markFailed,
   markFinished,
   markRunning,
+  registerActiveRun,
+  unregisterActiveRun,
 } from "../lib/job-control.mjs";
 import { renderStreamEvent } from "../lib/render.mjs";
 import { ensureStateDir, readJob, resolveStateDir } from "../lib/state.mjs";
@@ -187,6 +189,10 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
     const result = await sendTask(agent, fullPrompt, {
       ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
       ...(flags.force ? { force: true } : {}),
+      onRunStart: (run) => {
+        markRunning(stateDir, job.id, { agentId: run.agentId, runId: run.id });
+        registerActiveRun(job.id, run);
+      },
       onEvent: (event: SDKMessage) => {
         for (const ae of toAgentEvents(event)) {
           const rendered = renderStreamEvent(ae, { quietStatus: true });
@@ -199,7 +205,6 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
       },
     });
 
-    markRunning(stateDir, job.id, { agentId: result.agentId, runId: result.runId });
     markFinished(stateDir, job.id, result);
 
     if (flags.json) {
@@ -213,15 +218,19 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
     markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
     throw err;
   } finally {
+    unregisterActiveRun(job.id);
     await disposeAgent(agent).catch(() => undefined);
   }
 }
 
 /**
  * Background mode: kick off the run, persist its events to the per-job log,
- * and return immediately. The CLI process exits right after; the run keeps
- * going under the SDK's local runtime. Cancellation of a background run
- * falls back to `run-not-active` + persisted-mark in the calling process.
+ * and return immediately. The CLI process keeps running until the IIFE
+ * resolves (Node won't exit while a Promise is pending), so the run
+ * actually completes — but stdout was already returned to the user. Cancel
+ * of a background run from a different CLI invocation falls back to
+ * `run-not-active` + persisted-mark since the Run object is in this process
+ * only.
  */
 function detachBackgroundRun(
   agent: Awaited<ReturnType<typeof createAgent>>,
@@ -235,6 +244,10 @@ function detachBackgroundRun(
       const result = await sendTask(agent, prompt, {
         ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
         ...(flags.force ? { force: true } : {}),
+        onRunStart: (run) => {
+          markRunning(stateDir, jobId, { agentId: run.agentId, runId: run.id });
+          registerActiveRun(jobId, run);
+        },
         onEvent: (event: SDKMessage) => {
           for (const ae of toAgentEvents(event)) {
             const rendered = renderStreamEvent(ae);
@@ -243,11 +256,11 @@ function detachBackgroundRun(
           }
         },
       });
-      markRunning(stateDir, jobId, { agentId: result.agentId, runId: result.runId });
       markFinished(stateDir, jobId, result);
     } catch (err) {
       markFailed(stateDir, jobId, err instanceof Error ? err.message : String(err));
     } finally {
+      unregisterActiveRun(jobId);
       await disposeAgent(agent).catch(() => undefined);
     }
   })();

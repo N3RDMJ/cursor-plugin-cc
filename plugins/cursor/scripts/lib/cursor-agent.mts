@@ -65,6 +65,12 @@ export interface SendTaskOptions {
   /** Invoked once for every SDKMessage emitted while the run streams. */
   onEvent?: (event: SDKMessage) => void;
   /**
+   * Fires once `agent.send` resolves and we have a `Run` — before any events
+   * are streamed. Lets callers stamp job state to "running" and register the
+   * Run for capability-checked cancellation while the work is in flight.
+   */
+  onRunStart?: (run: Run) => void;
+  /**
    * Local-only: expire the agent's currently-active persisted run before
    * starting this one. Recovery path when a previous CLI process crashed
    * mid-run and left the agent wedged.
@@ -175,6 +181,7 @@ export async function sendTask(
   const run = options.force
     ? await agent.send(prompt, { local: { force: true } } satisfies SendOptions)
     : await agent.send(prompt);
+  options.onRunStart?.(run);
   return collectRunResult(run, options);
 }
 
@@ -185,12 +192,13 @@ export async function sendTask(
  * signal to callers.
  */
 export async function oneShot(prompt: string, opts: OneShotOptions): Promise<CursorRunResult> {
-  const { timeoutMs, onEvent, force, ...agentOpts } = opts;
+  const { timeoutMs, onEvent, onRunStart, force, ...agentOpts } = opts;
   const agent = await createAgent(agentOpts);
   try {
     const sendOpts: SendTaskOptions = {};
     if (timeoutMs !== undefined) sendOpts.timeoutMs = timeoutMs;
     if (onEvent !== undefined) sendOpts.onEvent = onEvent;
+    if (onRunStart !== undefined) sendOpts.onRunStart = onRunStart;
     if (force !== undefined) sendOpts.force = force;
     return await sendTask(agent, prompt, sendOpts);
   } finally {

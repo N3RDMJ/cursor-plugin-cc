@@ -4,7 +4,7 @@ import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
 import { getDiff, getStatus } from "../lib/git.mjs";
-import { createJob, markFailed, markFinished } from "../lib/job-control.mjs";
+import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
 import { type ReviewOutput, renderReviewResult } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -186,7 +186,12 @@ export async function runReview(
     prompt: `${options.adversarial ? "adversarial-" : ""}review of ${flags.staged ? "staged" : "working-tree"} diff`,
   });
 
-  const oneShotOpts: Parameters<typeof oneShot>[1] = { cwd: workspaceRoot };
+  const oneShotOpts: Parameters<typeof oneShot>[1] = {
+    cwd: workspaceRoot,
+    onRunStart: (run) => {
+      markRunning(stateDir, job.id, { agentId: run.agentId, runId: run.id });
+    },
+  };
   if (flags.model) oneShotOpts.model = flags.model;
   if (flags.timeoutMs) oneShotOpts.timeoutMs = flags.timeoutMs;
 

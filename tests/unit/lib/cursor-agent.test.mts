@@ -585,6 +585,35 @@ describe("cloud mode", () => {
   });
 });
 
+describe("sendTask onRunStart", () => {
+  it("fires once with the live Run before streaming begins", async () => {
+    const events: SDKMessage[] = [
+      {
+        type: "assistant",
+        agent_id: "agent-test",
+        run_id: "run-onstart",
+        message: { role: "assistant", content: [{ type: "text", text: "ok" }] },
+      },
+    ];
+    const run = makeRun(events, { id: "run-onstart", status: "finished" });
+    const agent = fakeAgent(run);
+    const observed: string[] = [];
+    let observedRunId: string | undefined;
+
+    await sendTask(agent, "go", {
+      onRunStart: (r) => {
+        observedRunId = r.id;
+        observed.push("start");
+      },
+      onEvent: () => observed.push("event"),
+    });
+
+    expect(observedRunId).toBe("run-onstart");
+    expect(observed[0]).toBe("start");
+    expect(observed.includes("event")).toBe(true);
+  });
+});
+
 describe("sendTask force flag", () => {
   it("passes local.force=true to agent.send when options.force is set", async () => {
     const run = makeRun([], { id: "r-force", status: "finished" });
