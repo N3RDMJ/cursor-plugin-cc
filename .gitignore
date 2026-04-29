@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+.env
+CLAUDE.local.md
+.claude/settings.local.json
