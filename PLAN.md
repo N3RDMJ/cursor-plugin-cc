@@ -159,13 +159,13 @@ Slim, single-purpose module. Mirrors codex-plugin-cc's `workspace.mjs`.
 
 Job and session state persisted to disk.
 
-- [ ] State directory: `~/.claude/cursor-plugin/<slug>-<workspace-hash>/` where the hash is `sha256(canonicalWorkspaceRoot).slice(0, 16)` and the slug is the sanitized basename (matches codex plugin layout).
-- [ ] `state.json` — index of all jobs (last 50 retained)
-- [ ] `<jobId>.json` — per-job result payload
-- [ ] `<jobId>.log` — per-job streaming log
-- [ ] `session.json` — current session metadata (session ID, agent IDs, start time)
-- [ ] Atomic writes (write to tmp, rename) to prevent corruption
-- [ ] Auto-prune: delete oldest jobs when exceeding 50
+- [x] State directory: `~/.claude/cursor-plugin/<slug>-<workspace-hash>/` where the hash is `sha256(canonicalWorkspaceRoot).slice(0, 16)` and the slug is the sanitized basename (matches codex plugin layout). `CURSOR_PLUGIN_STATE_ROOT` overrides the root for tests/dev.
+- [x] `state.json` — index of all jobs (last 50 retained)
+- [x] `<jobId>.json` — per-job result payload
+- [x] `<jobId>.log` — per-job streaming log (append-only)
+- [x] `session.json` — current session metadata (session ID, agent IDs, start time)
+- [x] Atomic writes (write to tmp, rename) to prevent corruption (`writeJsonAtomic`)
+- [x] Auto-prune: delete oldest jobs when exceeding 50 (`pruneJobIndex`, ordered by `createdAt`; also removes the per-job json/log files)
 
 ### 2.4 `lib/job-control.mts` — Job CRUD
 
