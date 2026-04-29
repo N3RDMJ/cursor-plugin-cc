@@ -149,15 +149,17 @@ Key behaviors:
 
 ### 2.2 `lib/workspace.mts` — Workspace Resolution
 
-- [ ] Find git root from cwd (`git rev-parse --show-toplevel`)
-- [ ] Generate stable workspace ID (SHA-256 of absolute git root path)
-- [ ] Provide workspace metadata (branch, remote URL, dirty status)
+Slim, single-purpose module. Mirrors codex-plugin-cc's `workspace.mjs`.
+
+- [x] `resolveWorkspaceRoot(cwd)` — `git rev-parse --show-toplevel` with fallback to `cwd` when cwd is not inside a git repo (so the plugin still works in non-git scratch dirs).
+- ~~Generate stable workspace ID (SHA-256 of absolute git root path)~~ → moved to **2.3 `state.mts`**: hashing is a state-dir concern, not a workspace concern. State derives `${slug}-${sha256(canonicalRoot)[:16]}` itself from the resolved root.
+- ~~Provide workspace metadata (branch, remote URL, dirty status)~~ → moved to **2.5 `git.mts`**: branch/remote/dirty are git queries used for prompt context, not workspace identity.
 
 ### 2.3 `lib/state.mts` — Persistent State
 
 Job and session state persisted to disk.
 
-- [ ] State directory: `~/.claude/cursor-plugin/<workspace-hash>/`
+- [ ] State directory: `~/.claude/cursor-plugin/<slug>-<workspace-hash>/` where the hash is `sha256(canonicalWorkspaceRoot).slice(0, 16)` and the slug is the sanitized basename (matches codex plugin layout).
 - [ ] `state.json` — index of all jobs (last 50 retained)
 - [ ] `<jobId>.json` — per-job result payload
 - [ ] `<jobId>.log` — per-job streaming log
@@ -181,6 +183,8 @@ Job and session state persisted to disk.
 - [ ] `getStatus()` — working tree status summary
 - [ ] `getRecentCommits(n)` — last N commit messages + hashes
 - [ ] `getBranch()` — current branch name
+- [ ] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
+- [ ] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
 - [ ] `getChangedFiles()` — list of modified/added/deleted files
 
 ### 2.6 `lib/render.mts` — Terminal Output
