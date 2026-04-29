@@ -8,14 +8,14 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
 ## Phase 1: Project Scaffolding
 
 ### 1.1 Repository Setup
-- [ ] `git init`
-- [ ] Create `.gitignore` (node_modules, dist, .env, CLAUDE.local.md, *.log)
-- [ ] `npm init` with correct metadata (name: `cursor-plugin-cc`, license, repo URL)
+- [x] `git init`
+- [x] Create `.gitignore` (node_modules, dist, .env, CLAUDE.local.md, *.log)
+- [x] `npm init` with correct metadata (name: `cursor-plugin-cc`, license, repo URL)
 - [ ] Install dependencies:
   - `@cursor/sdk` — Cursor agent SDK
   - `typescript` — compiler (dev)
   - `vitest` — test runner (dev)
-  - `eslint` + `@typescript-eslint/*` — linting (dev)
+  - ~~`eslint` + `@typescript-eslint/*`~~ → replaced by `@biomejs/biome` (installed)
   - `tsup` or plain `tsc` — build (dev)
 
 ### 1.2 TypeScript Config
@@ -23,9 +23,10 @@ Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) arch
 - [ ] Source in `plugins/cursor/scripts/` → compiled to `plugins/cursor/scripts/dist/`
 - [ ] Separate `tsconfig.build.json` if needed (exclude tests)
 
-### 1.3 ESLint Config
-- [ ] `eslint.config.mjs` with `@typescript-eslint/recommended`
-- [ ] Rule: no `any`, no `@ts-ignore`
+### 1.3 Lint Config (Biome, replacing ESLint)
+- [x] `biome.json` with lint + format rules (replaces `eslint.config.mjs`)
+- [x] Rule: no `any`, no `@ts-ignore` (enforced via Biome + CLAUDE.md convention)
+- [x] Husky pre-commit runs `biome check --staged`
 
 ### 1.4 Package Scripts
 ```json
