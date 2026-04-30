@@ -1,7 +1,7 @@
 import type { ModelSelection } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, optionalString, parseArgs } from "../lib/args.mjs";
+import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
 import { getDiff, getStatus } from "../lib/git.mjs";
 import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
@@ -92,7 +92,7 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
-    if (!Number.isFinite(ms) || ms <= 0) throw new Error(`invalid --timeout: ${timeout}`);
+    if (!Number.isFinite(ms) || ms <= 0) throw new UsageError(`invalid --timeout: ${timeout}`);
     flags.timeoutMs = ms;
   }
   return flags;

@@ -1,7 +1,7 @@
 import type { ModelSelection, SDKMessage } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, optionalString, parseArgs } from "../lib/args.mjs";
+import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildPrompt,
   type CursorAgentOptions,
@@ -76,7 +76,7 @@ function parseFlags(args: readonly string[]): TaskFlags {
   if (bool(parsed, "help")) throw new HelpRequested();
 
   const prompt = parsed.positionals.join(" ").trim();
-  if (!prompt) throw new Error("task requires a prompt argument");
+  if (!prompt) throw new UsageError("task requires a prompt argument");
 
   const flags: TaskFlags = {
     prompt,
@@ -92,7 +92,7 @@ function parseFlags(args: readonly string[]): TaskFlags {
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
-    if (!Number.isFinite(ms) || ms <= 0) throw new Error(`invalid --timeout: ${timeout}`);
+    if (!Number.isFinite(ms) || ms <= 0) throw new UsageError(`invalid --timeout: ${timeout}`);
     flags.timeoutMs = ms;
   }
   return flags;

@@ -1,5 +1,5 @@
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, parseArgs } from "../lib/args.mjs";
+import { bool, parseArgs, UsageError } from "../lib/args.mjs";
 import { getJob } from "../lib/job-control.mjs";
 import { readJobLog, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -21,7 +21,7 @@ export async function runResult(args: readonly string[], io: CommandIO): Promise
   }
 
   const jobId = parsed.positionals[0];
-  if (!jobId) throw new Error("result requires a job id");
+  if (!jobId) throw new UsageError("result requires a job id");
 
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);

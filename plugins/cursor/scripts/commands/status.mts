@@ -1,5 +1,5 @@
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, optionalString, parseArgs } from "../lib/args.mjs";
+import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { getJob, type ListJobsFilter, listJobs } from "../lib/job-control.mjs";
 import { renderJobTable } from "../lib/render.mjs";
 import { type JobStatus, type JobType, resolveStateDir } from "../lib/state.mjs";
@@ -60,14 +60,16 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
   const type = optionalString(parsed, "type");
   if (type) {
     if (!VALID_TYPES.has(type)) {
-      throw new Error(`invalid --type: ${type} (expected one of ${[...VALID_TYPES].join(", ")})`);
+      throw new UsageError(
+        `invalid --type: ${type} (expected one of ${[...VALID_TYPES].join(", ")})`,
+      );
     }
     filter.type = type as JobType;
   }
   const status = optionalString(parsed, "status");
   if (status) {
     if (!VALID_STATUSES.has(status)) {
-      throw new Error(
+      throw new UsageError(
         `invalid --status: ${status} (expected one of ${[...VALID_STATUSES].join(", ")})`,
       );
     }
@@ -76,7 +78,7 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
   const limit = optionalString(parsed, "limit");
   if (limit) {
     const n = Number(limit);
-    if (!Number.isFinite(n) || n < 0) throw new Error(`invalid --limit: ${limit}`);
+    if (!Number.isFinite(n) || n < 0) throw new UsageError(`invalid --limit: ${limit}`);
     filter.limit = Math.floor(n);
   }
   const jobs = listJobs(stateDir, filter);

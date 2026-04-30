@@ -60,16 +60,28 @@ describe("cursor-companion router", () => {
     expect(io.captured.stdout.join("")).toContain("(no jobs)");
   });
 
-  it("result with missing job id exits non-zero", async () => {
+  it("result with missing job id exits 2 (UsageError)", async () => {
     const io = captureIO(workDir);
-    expect(await companionMain(argv("result"), io)).toBe(1);
+    expect(await companionMain(argv("result"), io)).toBe(2);
     expect(io.captured.stderr.join("")).toContain("error: result requires a job id");
   });
 
-  it("cancel of a missing job exits 1", async () => {
+  it("cancel without a job id exits 2 (UsageError)", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("cancel"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("cancel requires a job id");
+  });
+
+  it("cancel of a missing job exits 1 (runtime error, not usage)", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("cancel", "missing-id"), io)).toBe(1);
     expect(io.captured.stderr.join("")).toContain("could not cancel");
+  });
+
+  it("task without a prompt exits 2 (UsageError)", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("task"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("task requires a prompt argument");
   });
 
   it("--help on a subcommand prints subcommand help and exits 0", async () => {
@@ -78,17 +90,17 @@ describe("cursor-companion router", () => {
     expect(io.captured.stdout.join("")).toContain("Delegate an implementation task");
   });
 
-  it("status rejects invalid --type with a helpful error", async () => {
+  it("status rejects invalid --type with exit 2", async () => {
     const io = captureIO(workDir);
-    expect(await companionMain(argv("status", "--type", "bogus"), io)).toBe(1);
+    expect(await companionMain(argv("status", "--type", "bogus"), io)).toBe(2);
     const err = io.captured.stderr.join("");
     expect(err).toContain("invalid --type");
     expect(err).toContain("task");
   });
 
-  it("status rejects invalid --status with a helpful error", async () => {
+  it("status rejects invalid --status with exit 2", async () => {
     const io = captureIO(workDir);
-    expect(await companionMain(argv("status", "--status", "weird"), io)).toBe(1);
+    expect(await companionMain(argv("status", "--status", "weird"), io)).toBe(2);
     expect(io.captured.stderr.join("")).toContain("invalid --status");
   });
 

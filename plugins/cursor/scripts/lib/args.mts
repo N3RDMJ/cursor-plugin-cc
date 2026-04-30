@@ -10,6 +10,19 @@
  * flags throw because they would otherwise silently swallow the next token.
  */
 
+/**
+ * Thrown for any user-supplied argv defect: missing required value, unknown
+ * short flag, missing positional, invalid filter value, etc. The CLI router
+ * maps this to exit code 2 (per the documented convention) instead of the
+ * generic exit 1 used for runtime failures.
+ */
+export class UsageError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UsageError";
+  }
+}
+
 export interface ParsedArgs {
   /** Positional arguments, in order. */
   positionals: string[];
@@ -60,7 +73,7 @@ export function parseArgs(argv: readonly string[], spec: ArgSpec = {}): ParsedAr
         } else {
           const next = argv[i + 1];
           if (next === undefined || next.startsWith("-")) {
-            throw new Error(`expected value after --${name}`);
+            throw new UsageError(`expected value after --${name}`);
           }
           flags[name] = next;
           i += 1;
@@ -77,13 +90,13 @@ export function parseArgs(argv: readonly string[], spec: ArgSpec = {}): ParsedAr
       const shortName = arg.slice(1);
       const longName = short[shortName];
       if (!longName) {
-        throw new Error(`unknown short flag: ${arg}`);
+        throw new UsageError(`unknown short flag: ${arg}`);
       }
       const kind = long[longName];
       if (kind === "string") {
         const next = argv[i + 1];
         if (next === undefined || next.startsWith("-")) {
-          throw new Error(`expected value after ${arg}`);
+          throw new UsageError(`expected value after ${arg}`);
         }
         flags[longName] = next;
         i += 1;
@@ -102,7 +115,7 @@ export function parseArgs(argv: readonly string[], spec: ArgSpec = {}): ParsedAr
 /** Convenience: extract a string flag, throwing if missing. */
 export function requireString(parsed: ParsedArgs, name: string): string {
   const v = parsed.flags[name];
-  if (typeof v !== "string") throw new Error(`missing required --${name}`);
+  if (typeof v !== "string") throw new UsageError(`missing required --${name}`);
   return v;
 }
 

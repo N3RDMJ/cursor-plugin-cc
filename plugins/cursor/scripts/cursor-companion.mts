@@ -5,6 +5,7 @@ import { runReview } from "./commands/review.mjs";
 import { runSetup } from "./commands/setup.mjs";
 import { runStatus } from "./commands/status.mjs";
 import { runTask } from "./commands/task.mjs";
+import { UsageError } from "./lib/args.mjs";
 import { renderError } from "./lib/render.mjs";
 
 export type ExitCode = 0 | 1 | 2;
@@ -65,7 +66,7 @@ export async function main(argv: readonly string[], io: CommandIO): Promise<Exit
     }
   } catch (err) {
     io.stderr.write(renderError(err));
-    return 1;
+    return err instanceof UsageError ? 2 : 1;
   }
 }
 
