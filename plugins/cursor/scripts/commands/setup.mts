@@ -179,10 +179,10 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
 
   const workspaceRoot = resolveWorkspaceRoot(io.cwd());
   const stateDir = resolveStateDir(workspaceRoot);
-  const gateEnabled =
-    enableGate || disableGate
-      ? setGateEnabled(stateDir, enableGate).enabled
-      : readGateConfig(stateDir).enabled;
+  const togglingGate = enableGate || disableGate;
+  const gateEnabled = togglingGate
+    ? setGateEnabled(stateDir, enableGate).enabled
+    : readGateConfig(stateDir).enabled;
 
   const report = await buildReport({ workspaceRoot, gateEnabled });
 

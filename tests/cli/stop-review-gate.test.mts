@@ -53,8 +53,6 @@ function initRepo(): void {
   );
 }
 
-const captureIO = (stdin: string, cwd: string = workDir) => captureHookIO(stdin, cwd);
-
 beforeEach(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "cursor-gate-cwd-"));
   stateRoot = mkdtempSync(path.join(tmpdir(), "cursor-gate-state-"));
@@ -74,7 +72,7 @@ afterEach(() => {
 describe("stop-review-gate-hook", () => {
   it("allows when the gate is disabled (default)", async () => {
     writeFileSync(path.join(workDir, FOO_TS), DIRTY);
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(sdkMocks.agentCreate).not.toHaveBeenCalled();
@@ -84,7 +82,7 @@ describe("stop-review-gate-hook", () => {
     const stateDir = resolveStateDir(workDir);
     ensureStateDir(stateDir);
     setGateEnabled(stateDir, true);
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(sdkMocks.agentCreate).not.toHaveBeenCalled();
@@ -95,7 +93,7 @@ describe("stop-review-gate-hook", () => {
     const stateDir = resolveStateDir(workDir);
     ensureStateDir(stateDir);
     setGateEnabled(stateDir, true);
-    const io = captureIO(JSON.stringify({ cwd: workDir, stop_hook_active: true }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir, stop_hook_active: true }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(sdkMocks.agentCreate).not.toHaveBeenCalled();
@@ -112,7 +110,7 @@ describe("stop-review-gate-hook", () => {
     });
     sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
 
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(sdkMocks.agentCreate).toHaveBeenCalledTimes(1);
@@ -130,7 +128,7 @@ describe("stop-review-gate-hook", () => {
     });
     sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
 
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     const stdout = io.captured.stdout.join("");
     expect(stdout.length).toBeGreaterThan(0);
@@ -147,7 +145,7 @@ describe("stop-review-gate-hook", () => {
     setGateEnabled(stateDir, true);
     sdkMocks.agentCreate.mockRejectedValue(new Error("network down"));
 
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(io.captured.stderr.join("")).toContain("network down");
@@ -165,7 +163,7 @@ describe("stop-review-gate-hook", () => {
     });
     sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
 
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(io.captured.stderr.join("")).toContain("could not parse review");
@@ -182,7 +180,7 @@ describe("stop-review-gate-hook", () => {
     });
     sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
 
-    const io = captureIO(JSON.stringify({ cwd: workDir }));
+    const io = captureHookIO(JSON.stringify({ cwd: workDir }));
     expect(await gateMain(io)).toBe(0);
     expect(io.captured.stdout.join("")).toBe("");
     expect(io.captured.stderr.join("")).toContain("did not finish");
