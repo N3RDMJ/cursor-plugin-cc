@@ -1,32 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Writable } from "node:stream";
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
 import { createJob, markFinished, markRunning } from "@plugin/lib/job-control.mjs";
 import { ensureStateDir, resolveStateDir } from "@plugin/lib/state.mjs";
+import { argv, captureIO } from "@test/helpers/io.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-
-function captureIO(cwd: string) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (sink: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        sink.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => cwd,
-    env: process.env,
-    captured: { stdout, stderr },
-  };
-}
-
-const argv = (...rest: string[]): string[] => ["node", "cursor-companion", ...rest];
 
 let workDir: string;
 let stateRoot: string;

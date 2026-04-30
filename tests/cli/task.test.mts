@@ -1,8 +1,8 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Writable } from "node:stream";
 import type { SDKMessage } from "@cursor/sdk";
+import { argv, captureIO, sentPrompt } from "@test/helpers/io.mjs";
 import { assistantText, fakeAgent, makeRun } from "@test/helpers/sdk-mock.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,28 +24,7 @@ vi.mock("@cursor/sdk", async () => {
 
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
 import { listJobs } from "@plugin/lib/job-control.mjs";
-import { readJob } from "@plugin/lib/state.mjs";
-
-function captureIO(cwd: string) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (sink: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        sink.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => cwd,
-    env: process.env,
-    captured: { stdout, stderr },
-  };
-}
-
-const argv = (...rest: string[]): string[] => ["node", "cursor-companion", ...rest];
+import { readJob, resolveStateDir } from "@plugin/lib/state.mjs";
 
 let workDir: string;
 let stateRoot: string;
@@ -76,24 +55,22 @@ describe("CLI: task", () => {
     sdkMocks.agentCreate.mockResolvedValue(agent);
 
     const io = captureIO(workDir);
-    const code = await companionMain(argv("task", "refactor", "auth"), io);
-    expect(code).toBe(0);
-
-    const stdout = io.captured.stdout.join("");
-    expect(stdout).toContain("all good");
+    expect(await companionMain(argv("task", "refactor", "auth"), io)).toBe(0);
+    expect(io.captured.stdout.join("")).toContain("all good");
 
     expect(agent.send).toHaveBeenCalledTimes(1);
-    const sentPrompt = vi.mocked(agent.send).mock.calls[0]?.[0] as string;
-    expect(sentPrompt).toContain("refactor auth");
-    expect(sentPrompt).toContain("Do NOT modify files");
+    const prompt = sentPrompt(agent);
+    expect(prompt).toContain("refactor auth");
+    expect(prompt).toContain("Do NOT modify files");
     expect(agent[Symbol.asyncDispose]).toHaveBeenCalledTimes(1);
 
-    const jobs = listJobs(path.join(stateRoot, listFirstWorkspaceSlug(stateRoot)));
+    const stateDir = resolveStateDir(workDir);
+    const jobs = listJobs(stateDir);
     expect(jobs.length).toBe(1);
     expect(jobs[0]?.type).toBe("task");
     expect(jobs[0]?.status).toBe("completed");
 
-    const job = readJob(path.join(stateRoot, listFirstWorkspaceSlug(stateRoot)), jobs[0]?.id ?? "");
+    const job = readJob(stateDir, jobs[0]?.id ?? "");
     expect(job?.result).toBe("all good");
     expect(job?.agentId).toBe("agent-test");
     expect(job?.runId).toBe("run-task-1");
@@ -110,9 +87,9 @@ describe("CLI: task", () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("task", "fix", "the", "bug", "--write"), io)).toBe(0);
 
-    const sent = vi.mocked(agent.send).mock.calls[0]?.[0] as string;
-    expect(sent).toContain("You may modify files");
-    expect(sent).not.toContain("Do NOT modify files");
+    const prompt = sentPrompt(agent);
+    expect(prompt).toContain("You may modify files");
+    expect(prompt).not.toContain("Do NOT modify files");
   });
 
   it("--background returns the job id immediately and the agent is created", async () => {
@@ -120,8 +97,7 @@ describe("CLI: task", () => {
       events: [assistantText("run-bg", "later")],
       result: { id: "run-bg", status: "finished" },
     });
-    const agent = fakeAgent(run);
-    sdkMocks.agentCreate.mockResolvedValue(agent);
+    sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("task", "long task", "--background"), io)).toBe(0);
@@ -142,14 +118,3 @@ describe("CLI: task", () => {
     expect(await companionMain(argv("task", "do thing"), io)).toBe(1);
   });
 });
-
-/**
- * Find the single workspace state slug created by a task run inside the
- * isolated stateRoot. Since each test uses a fresh stateRoot containing one
- * workspace, returning the first entry is unambiguous.
- */
-function listFirstWorkspaceSlug(stateRoot: string): string {
-  const entries = readdirSync(stateRoot);
-  if (entries.length === 0) throw new Error("no workspace slug created");
-  return entries[0] ?? "";
-}

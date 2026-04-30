@@ -4,7 +4,7 @@
  */
 import type { ReviewOutput } from "@plugin/lib/render.mjs";
 
-export const APPROVE_REVIEW: ReviewOutput = {
+const APPROVE_REVIEW: ReviewOutput = {
   verdict: "approve",
   summary: "Change is small and correct.",
   findings: [],
@@ -29,17 +29,9 @@ export const NEEDS_ATTENTION_REVIEW: ReviewOutput = {
   next_steps: ["remove debug log"],
 };
 
-/** Raw, no fences. */
 export const RAW_APPROVE = JSON.stringify(APPROVE_REVIEW);
 
 /** Wrapped in ```json fences (agents do this despite instructions). */
 export const FENCED_APPROVE = `\`\`\`json\n${JSON.stringify(APPROVE_REVIEW, null, 2)}\n\`\`\``;
 
-/** Wrapped in plain ``` fences. */
-export const FENCED_PLAIN = `\`\`\`\n${JSON.stringify(NEEDS_ATTENTION_REVIEW)}\n\`\`\``;
-
-/** Garbage that is not JSON at all. */
 export const NOT_JSON = "the agent decided to talk instead of producing JSON";
-
-/** Valid JSON with the wrong shape. */
-export const INVALID_SHAPE = JSON.stringify({ verdict: "maybe", summary: "" });

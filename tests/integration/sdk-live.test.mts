@@ -1,12 +1,10 @@
 /**
  * Live integration tests against the real Cursor SDK. Skipped automatically
- * unless `CURSOR_API_KEY` is set in the environment, so CI without the secret
- * stays green and local devs can opt in by exporting the key.
+ * unless `CURSOR_API_KEY` is set so CI without the secret stays green and
+ * local devs can opt in by exporting the key.
  *
- * These tests are intentionally minimal — they validate that our wrapper
- * still talks to the real SDK without breaking, not that the agent produces
- * any specific output. If they start flapping due to model behavior, narrow
- * the assertions further (e.g. just check `status === "finished"`).
+ * If they start flapping due to model behavior, narrow the assertions further
+ * (e.g. just check `status === "finished"`).
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +12,7 @@ import path from "node:path";
 import { listModels, oneShot, whoami } from "@plugin/lib/cursor-agent.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const HAS_KEY = !!process.env.CURSOR_API_KEY?.trim();
-const describeLive = HAS_KEY ? describe : describe.skip;
+const NO_KEY = !process.env.CURSOR_API_KEY?.trim();
 
 let workDir: string;
 
@@ -27,7 +24,7 @@ afterEach(() => {
   rmSync(workDir, { recursive: true, force: true });
 });
 
-describeLive("live @cursor/sdk integration (CURSOR_API_KEY set)", () => {
+describe.skipIf(NO_KEY)("live @cursor/sdk integration (CURSOR_API_KEY set)", () => {
   it("Cursor.me succeeds with a valid key", async () => {
     const me = await whoami();
     expect(me).toBeDefined();

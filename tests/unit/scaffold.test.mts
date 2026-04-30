@@ -1,27 +1,8 @@
-import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { main as companionMain } from "../../plugins/cursor/scripts/cursor-companion.mjs";
 import { main as hookMain } from "../../plugins/cursor/scripts/session-lifecycle-hook.mjs";
-
-function captureIO() {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (sink: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        sink.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => process.cwd(),
-    env: process.env,
-    captured: { stdout, stderr },
-  };
-}
+import { captureIO } from "../helpers/io.mjs";
 
 describe("cursor-companion CLI", () => {
   it("prints usage and exits 0 with no args", async () => {

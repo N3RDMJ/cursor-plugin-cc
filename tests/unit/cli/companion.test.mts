@@ -1,33 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { main as companionMain } from "../../../plugins/cursor/scripts/cursor-companion.mjs";
-
-function captureIO(cwd: string) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (sink: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        sink.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => cwd,
-    env: process.env,
-    captured: { stdout, stderr },
-  };
-}
+import { argv, captureIO } from "../../helpers/io.mjs";
 
 let workDir: string;
 let stateDir: string;
-const argv = (...rest: string[]): string[] => ["node", "cursor-companion", ...rest];
 
 beforeEach(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "cursor-cli-cwd-"));

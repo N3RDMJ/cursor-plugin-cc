@@ -6,7 +6,15 @@
  * declare the mock state, then wire `Agent.create` / `Cursor.me` to it.
  */
 
-import type { Run, RunOperation, RunResult, RunStatus, SDKAgent, SDKMessage } from "@cursor/sdk";
+import type {
+  Run,
+  RunOperation,
+  RunResult,
+  RunStatus,
+  SDKAgent,
+  SDKMessage,
+  SDKToolUseMessage,
+} from "@cursor/sdk";
 import { vi } from "vitest";
 
 export interface MakeRunOptions {
@@ -72,9 +80,6 @@ export function fakeAgent(run: Run, agentId = run.agentId): SDKAgent {
   };
 }
 
-/**
- * Build an assistant SDKMessage with one or more text blocks.
- */
 export function assistantText(runId: string, ...chunks: string[]): SDKMessage {
   return {
     type: "assistant",
@@ -87,24 +92,22 @@ export function assistantText(runId: string, ...chunks: string[]): SDKMessage {
   };
 }
 
-/**
- * Build a tool_call SDKMessage.
- */
 export function toolCallEvent(
   runId: string,
   callId: string,
   name: string,
   status: "running" | "completed" | "error",
   extra: { args?: unknown; result?: unknown } = {},
-): SDKMessage {
-  return {
+): SDKToolUseMessage {
+  const msg: SDKToolUseMessage = {
     type: "tool_call",
     agent_id: "agent-test",
     run_id: runId,
     call_id: callId,
     name,
     status,
-    ...(extra.args !== undefined ? { args: extra.args } : {}),
-    ...(extra.result !== undefined ? { result: extra.result } : {}),
-  } as SDKMessage;
+  };
+  if (extra.args !== undefined) msg.args = extra.args;
+  if (extra.result !== undefined) msg.result = extra.result;
+  return msg;
 }

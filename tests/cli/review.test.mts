@@ -2,16 +2,16 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Writable } from "node:stream";
 import {
   FENCED_APPROVE,
   NEEDS_ATTENTION_REVIEW,
   NOT_JSON,
   RAW_APPROVE,
 } from "@test/fixtures/reviews.mjs";
+import { argv, captureIO, sentPrompt } from "@test/helpers/io.mjs";
 
 import { assistantText, fakeAgent, makeRun } from "@test/helpers/sdk-mock.mjs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sdkMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
@@ -31,34 +31,16 @@ vi.mock("@cursor/sdk", async () => {
 
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
 
-function captureIO(cwd: string) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (sink: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        sink.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => cwd,
-    env: process.env,
-    captured: { stdout, stderr },
-  };
-}
-
-const argv = (...rest: string[]): string[] => ["node", "cursor-companion", ...rest];
-
 let workDir: string;
 let stateRoot: string;
 
-function initRepoWithDirtyFile(): void {
-  // A real git repo so getDiff() returns non-empty output. We disable GPG
-  // signing because some sandboxed environments (Cursor / Claude Code on the
-  // web) configure a sign hook that breaks for bare-bones tests.
+const FOO_TS = "foo.ts";
+const ORIGINAL = "export const x = 1;\n";
+const DIRTY = "export const x = 2;\n";
+
+// GPG signing is force-disabled because some sandboxed environments install
+// a sign hook that breaks bare-bones test commits.
+function initRepo(): void {
   const env = {
     ...process.env,
     GIT_COMMITTER_NAME: "Test",
@@ -68,28 +50,33 @@ function initRepoWithDirtyFile(): void {
   };
   execFileSync("git", ["init", "-q"], { cwd: workDir, env });
   execFileSync("git", ["config", "commit.gpgsign", "false"], { cwd: workDir, env });
-  execFileSync("git", ["config", "tag.gpgsign", "false"], { cwd: workDir, env });
-  writeFileSync(path.join(workDir, "foo.ts"), "export const x = 1;\n");
+  writeFileSync(path.join(workDir, FOO_TS), ORIGINAL);
   execFileSync("git", ["add", "-A"], { cwd: workDir, env });
   execFileSync(
     "git",
     ["-c", "commit.gpgsign=false", "commit", "-q", "--no-gpg-sign", "-m", "init"],
     { cwd: workDir, env },
   );
-  writeFileSync(path.join(workDir, "foo.ts"), "export const x = 2;\n");
 }
 
-beforeEach(() => {
+beforeAll(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "cursor-review-cwd-"));
+  initRepo();
+});
+
+afterAll(() => {
+  rmSync(workDir, { recursive: true, force: true });
+});
+
+beforeEach(() => {
   stateRoot = mkdtempSync(path.join(tmpdir(), "cursor-review-state-"));
   process.env.CURSOR_PLUGIN_STATE_ROOT = stateRoot;
   process.env.CURSOR_API_KEY = "test-key";
   vi.clearAllMocks();
-  initRepoWithDirtyFile();
+  writeFileSync(path.join(workDir, FOO_TS), DIRTY);
 });
 
 afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
   rmSync(stateRoot, { recursive: true, force: true });
   delete process.env.CURSOR_PLUGIN_STATE_ROOT;
   delete process.env.CURSOR_API_KEY;
@@ -131,8 +118,7 @@ describe("CLI: review", () => {
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("review", "--json"), io)).toBe(1);
-    const stdout = io.captured.stdout.join("");
-    const parsed = JSON.parse(stdout);
+    const parsed = JSON.parse(io.captured.stdout.join(""));
     expect(parsed.verdict).toBe("needs-attention");
     expect(parsed.findings).toHaveLength(1);
   });
@@ -152,8 +138,7 @@ describe("CLI: review", () => {
   });
 
   it("empty diff exits 0 without contacting the SDK", async () => {
-    // Reset the working tree so the diff is empty.
-    writeFileSync(path.join(workDir, "foo.ts"), "export const x = 1;\n");
+    writeFileSync(path.join(workDir, FOO_TS), ORIGINAL);
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("review"), io)).toBe(0);
@@ -171,8 +156,8 @@ describe("CLI: review", () => {
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("adversarial-review"), io)).toBe(0);
-    const sent = vi.mocked(agent.send).mock.calls[0]?.[0] as string;
-    expect(sent).toContain("adversarial reviewer");
-    expect(sent).toContain("challenge design choices");
+    const prompt = sentPrompt(agent);
+    expect(prompt).toContain("adversarial reviewer");
+    expect(prompt).toContain("challenge design choices");
   });
 });
