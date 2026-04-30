@@ -1,8 +1,11 @@
 import type { ModelSelection } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, parseArgs } from "../lib/args.mjs";
+import { bool, parseArgs, UsageError } from "../lib/args.mjs";
 import { listModels, resolveApiKey, whoami } from "../lib/cursor-agent.mjs";
+import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
+import { resolveStateDir } from "../lib/state.mjs";
+import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const NODE_MIN_MAJOR = 18;
 
@@ -12,13 +15,21 @@ interface ModelChoice {
   description?: string;
 }
 
-const HELP = `cursor-companion setup [--json] [--help]
+const HELP = `cursor-companion setup [flags]
 
 Validates the plugin runtime:
   - Node.js >= ${NODE_MIN_MAJOR}
   - CURSOR_API_KEY is set
   - Cursor.me() succeeds (key is valid)
   - Cursor.models.list() returns at least one model
+
+Stop review gate (per workspace, opt-in):
+  --enable-gate        Turn on the Stop review gate for this workspace
+  --disable-gate       Turn off the Stop review gate for this workspace
+
+flags:
+  --json               Machine-readable output
+  --help, -h
 `;
 
 function nodeMajor(): number {
@@ -74,14 +85,21 @@ interface SetupReport {
   apiKey: { ok: boolean; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
   models: { ok: boolean; choices: ModelChoice[]; error?: string };
+  gate: { enabled: boolean; workspaceRoot: string };
 }
 
-async function buildReport(): Promise<SetupReport> {
+interface BuildReportInput {
+  workspaceRoot: string;
+  gateEnabled: boolean;
+}
+
+async function buildReport(input: BuildReportInput): Promise<SetupReport> {
   const report: SetupReport = {
     node: { ok: nodeMajor() >= NODE_MIN_MAJOR, version: process.versions.node },
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
+    gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot },
   };
 
   try {
@@ -132,12 +150,20 @@ function renderReport(report: SetupReport): string {
   } else if (report.models.error) {
     lines.push(`Models      fail  ${report.models.error}`);
   }
+  lines.push(
+    `Stop gate   ${report.gate.enabled ? "on" : "off"}   (workspace: ${report.gate.workspaceRoot})`,
+  );
   return `${lines.join("\n")}\n`;
 }
 
 export async function runSetup(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   const parsed = parseArgs(args, {
-    long: { json: "boolean", help: "boolean" },
+    long: {
+      json: "boolean",
+      help: "boolean",
+      "enable-gate": "boolean",
+      "disable-gate": "boolean",
+    },
     short: { h: "help" },
   });
   if (bool(parsed, "help")) {
@@ -145,7 +171,20 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     return 0;
   }
 
-  const report = await buildReport();
+  const enableGate = bool(parsed, "enable-gate");
+  const disableGate = bool(parsed, "disable-gate");
+  if (enableGate && disableGate) {
+    throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(io.cwd());
+  const stateDir = resolveStateDir(workspaceRoot);
+  const togglingGate = enableGate || disableGate;
+  const gateEnabled = togglingGate
+    ? setGateEnabled(stateDir, enableGate).enabled
+    : readGateConfig(stateDir).enabled;
+
+  const report = await buildReport({ workspaceRoot, gateEnabled });
 
   if (bool(parsed, "json")) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

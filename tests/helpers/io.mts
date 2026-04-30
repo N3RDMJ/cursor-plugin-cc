@@ -2,6 +2,14 @@ import { Writable } from "node:stream";
 import type { SDKAgent, SDKUserMessage } from "@cursor/sdk";
 import { vi } from "vitest";
 
+const sink = (target: string[]): NodeJS.WritableStream =>
+  new Writable({
+    write(chunk, _enc, cb) {
+      target.push(chunk.toString());
+      cb();
+    },
+  });
+
 export interface CapturedIO {
   stdout: NodeJS.WritableStream;
   stderr: NodeJS.WritableStream;
@@ -13,13 +21,6 @@ export interface CapturedIO {
 export function captureIO(cwd: string = process.cwd()): CapturedIO {
   const stdout: string[] = [];
   const stderr: string[] = [];
-  const sink = (target: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        target.push(chunk.toString());
-        cb();
-      },
-    });
   return {
     stdout: sink(stdout),
     stderr: sink(stderr),
@@ -30,6 +31,27 @@ export function captureIO(cwd: string = process.cwd()): CapturedIO {
 }
 
 export const argv = (...rest: string[]): string[] => ["node", "cursor-companion", ...rest];
+
+export interface CapturedHookIO {
+  readStdin: () => string;
+  stdout: NodeJS.WritableStream;
+  stderr: NodeJS.WritableStream;
+  cwd: () => string;
+  captured: { stdout: string[]; stderr: string[] };
+}
+
+/** captureIO sibling for hook entry points that take a `readStdin` instead of argv. */
+export function captureHookIO(stdin: string, cwd: string = process.cwd()): CapturedHookIO {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  return {
+    readStdin: () => stdin,
+    stdout: sink(stdout),
+    stderr: sink(stderr),
+    cwd: () => cwd,
+    captured: { stdout, stderr },
+  };
+}
 
 /**
  * Read the prompt the test passed to a mocked `agent.send`, asserting it was
