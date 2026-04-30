@@ -15,7 +15,11 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@plugin/*": ["./plugins/cursor/scripts/*"],
+      "@test/*": ["./tests/*"]
+    }
   },
   "include": ["plugins/cursor/scripts/**/*.mts", "tests/**/*.mts", "vitest.config.mts"],
   "exclude": ["node_modules", "**/dist/**"]
