@@ -5,13 +5,12 @@ import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildPrompt,
   type CursorAgentOptions,
-  createAgent,
   disposeAgent,
   resumeAgent,
   sendTask,
   toAgentEvents,
 } from "../lib/cursor-agent.mjs";
-import { detectCloudRepository, getBranch, getRecentCommits } from "../lib/git.mjs";
+import { detectCloudRepository } from "../lib/git.mjs";
 import {
   createJob,
   findRecentTaskAgents,
@@ -19,6 +18,7 @@ import {
   markFailed,
   markFinished,
   markRunning,
+  type RecentTaskAgent,
   registerActiveRun,
   unregisterActiveRun,
 } from "../lib/job-control.mjs";
@@ -26,28 +26,41 @@ import { renderStreamEvent } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
-const HELP = `cursor-companion task <prompt> [flags]
+const HELP = `cursor-companion resume <agent-id> <prompt> [flags]
+cursor-companion resume --last <prompt> [flags]
+cursor-companion resume --list [--limit <n>] [--json]
 
-Delegate an implementation task to a Cursor agent. Streams events to stdout
-(assistant text) and stderr (annotations).
+Reattach to an existing Cursor agent and continue the conversation. The agent
+keeps its prior context, so follow-up prompts are cheaper than starting fresh.
 
 flags:
+  --last               Resume the most recent task agent (no agent-id needed)
+  --list               Print known agent ids from this workspace, then exit
+  --limit <n>          With --list: cap the number of rows (default 10)
   --write              Allow file modifications (default: read-only)
-  --resume-last        Resume the most-recent task agent for this workspace
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
   --cloud              Use Cursor cloud against the detected GitHub origin
-  --model <id>         Override the default model
-  -m <id>
+  --model <id>, -m
   --timeout <ms>       Cancel the run if it exceeds this duration
   --json               Print the final result as JSON (single line)
   --help, -h
 `;
 
-interface TaskFlags {
+const DEFAULT_LIST_LIMIT = 10;
+
+interface ListFlags {
+  kind: "list";
+  limit: number;
+  json: boolean;
+}
+
+interface RunFlags {
+  kind: "run";
   prompt: string;
+  /** Either an explicit id (positional) or "last" — resolved at execution time. */
+  target: { kind: "id"; agentId: string } | { kind: "last" };
   write: boolean;
-  resumeLast: boolean;
   background: boolean;
   force: boolean;
   cloud: boolean;
@@ -56,13 +69,17 @@ interface TaskFlags {
   json: boolean;
 }
 
+type ResumeFlags = ListFlags | RunFlags;
+
 class HelpRequested extends Error {}
 
-function parseFlags(args: readonly string[]): TaskFlags {
+function parseFlags(args: readonly string[]): ResumeFlags {
   const parsed = parseArgs(args, {
     long: {
+      last: "boolean",
+      list: "boolean",
+      limit: "string",
       write: "boolean",
-      "resume-last": "boolean",
       background: "boolean",
       force: "boolean",
       cloud: "boolean",
@@ -75,17 +92,52 @@ function parseFlags(args: readonly string[]): TaskFlags {
   });
   if (bool(parsed, "help")) throw new HelpRequested();
 
-  const prompt = parsed.positionals.join(" ").trim();
-  if (!prompt) throw new UsageError("task requires a prompt argument");
+  const last = bool(parsed, "last");
+  const list = bool(parsed, "list");
+  const json = bool(parsed, "json");
 
-  const flags: TaskFlags = {
+  if (list) {
+    if (last) throw new UsageError("--list and --last are mutually exclusive");
+    let limit = DEFAULT_LIST_LIMIT;
+    const limitArg = optionalString(parsed, "limit");
+    if (limitArg !== undefined) {
+      const n = Number(limitArg);
+      if (!Number.isFinite(n) || n < 0) throw new UsageError(`invalid --limit: ${limitArg}`);
+      limit = Math.floor(n);
+    }
+    return { kind: "list", limit, json };
+  }
+
+  if (optionalString(parsed, "limit") !== undefined) {
+    throw new UsageError("--limit requires --list");
+  }
+
+  const positionals = [...parsed.positionals];
+  let target: RunFlags["target"];
+  if (last) {
+    target = { kind: "last" };
+  } else {
+    const agentId = positionals.shift();
+    if (!agentId) {
+      throw new UsageError(
+        "resume requires <agent-id> (or --last to pick the most recent, or --list to discover ids)",
+      );
+    }
+    target = { kind: "id", agentId };
+  }
+
+  const prompt = positionals.join(" ").trim();
+  if (!prompt) throw new UsageError("resume requires a prompt to send to the agent");
+
+  const flags: RunFlags = {
+    kind: "run",
     prompt,
+    target,
     write: bool(parsed, "write"),
-    resumeLast: bool(parsed, "resume-last"),
     background: bool(parsed, "background"),
     force: bool(parsed, "force"),
     cloud: bool(parsed, "cloud"),
-    json: bool(parsed, "json"),
+    json,
   };
   const modelId = optionalString(parsed, "model");
   if (modelId) flags.model = { id: modelId };
@@ -98,21 +150,7 @@ function parseFlags(args: readonly string[]): TaskFlags {
   return flags;
 }
 
-function buildContextHeader(workspaceRoot: string): string {
-  const lines: string[] = [];
-  const branch = getBranch(workspaceRoot);
-  if (branch) lines.push(`Current branch: ${branch}`);
-  const commits = getRecentCommits(workspaceRoot, 5);
-  if (commits.length > 0) {
-    lines.push("Recent commits:");
-    for (const c of commits) {
-      lines.push(`  ${c.hash.slice(0, 8)} ${c.subject}`);
-    }
-  }
-  return lines.join("\n");
-}
-
-function buildAgentOptionsForFlags(flags: TaskFlags, workspaceRoot: string): CursorAgentOptions {
+function buildAgentOptionsForFlags(flags: RunFlags, workspaceRoot: string): CursorAgentOptions {
   const opts: CursorAgentOptions = { cwd: workspaceRoot };
   if (flags.model) opts.model = flags.model;
   if (flags.cloud) {
@@ -122,12 +160,31 @@ function buildAgentOptionsForFlags(flags: TaskFlags, workspaceRoot: string): Cur
   return opts;
 }
 
-function findResumeAgentId(stateDir: string): string | undefined {
-  return findRecentTaskAgents(stateDir, 1)[0]?.agentId;
+function renderListText(rows: RecentTaskAgent[]): string {
+  if (rows.length === 0) return "(no resumable agents)\n";
+  const widths = {
+    agentId: "agent-id".length,
+    jobId: "job-id".length,
+    created: "created".length,
+  };
+  for (const r of rows) {
+    widths.agentId = Math.max(widths.agentId, r.agentId.length);
+    widths.jobId = Math.max(widths.jobId, r.jobId.length);
+    widths.created = Math.max(widths.created, r.createdAt.length);
+  }
+  const header = `${"AGENT-ID".padEnd(widths.agentId)}  ${"JOB-ID".padEnd(widths.jobId)}  ${"CREATED".padEnd(widths.created)}  SUMMARY`;
+  const separator = `${"-".repeat(widths.agentId)}  ${"-".repeat(widths.jobId)}  ${"-".repeat(widths.created)}  -------`;
+  const body = rows
+    .map((r) => {
+      const line = `${r.agentId.padEnd(widths.agentId)}  ${r.jobId.padEnd(widths.jobId)}  ${r.createdAt.padEnd(widths.created)}  ${r.summary ?? ""}`;
+      return line.trimEnd();
+    })
+    .join("\n");
+  return `${header}\n${separator}\n${body}\n`;
 }
 
-export async function runTask(args: readonly string[], io: CommandIO): Promise<ExitCode> {
-  let flags: TaskFlags;
+export async function runResume(args: readonly string[], io: CommandIO): Promise<ExitCode> {
+  let flags: ResumeFlags;
   try {
     flags = parseFlags(args);
   } catch (err) {
@@ -140,38 +197,50 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
 
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
+
+  if (flags.kind === "list") {
+    const stateDir = resolveStateDir(workspaceRoot);
+    const rows = findRecentTaskAgents(stateDir, flags.limit);
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+    } else {
+      io.stdout.write(renderListText(rows));
+    }
+    return 0;
+  }
+
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
+
+  let agentId: string;
+  if (flags.target.kind === "last") {
+    const top = findRecentTaskAgents(stateDir, 1)[0]?.agentId;
+    if (!top) {
+      io.stderr.write("no previous task agent to resume\n");
+      return 1;
+    }
+    agentId = top;
+  } else {
+    agentId = flags.target.agentId;
+  }
 
   const writePolicy = flags.write
     ? "You may modify files in the workspace."
     : "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
-  // Skip local-workspace context in cloud mode: the cloud agent runs against
-  // `startingRef` of the remote, so local uncommitted state would mislead it.
-  const contextHeader = flags.cloud ? "" : buildContextHeader(workspaceRoot);
-  const sections = [contextHeader, writePolicy, flags.prompt].filter((s) => s.length > 0);
-  const fullPrompt = buildPrompt(sections.join("\n\n"));
+  const fullPrompt = buildPrompt(`${writePolicy}\n\n${flags.prompt}`);
 
-  const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
+  const job = createJob(stateDir, {
+    type: "task",
+    prompt: flags.prompt,
+    metadata: { resumed: true, resumedAgentId: agentId },
+  });
 
-  const agentOpts = buildAgentOptionsForFlags(flags, workspaceRoot);
-  let agent: Awaited<ReturnType<typeof createAgent>>;
-  if (flags.resumeLast) {
-    const agentId = findResumeAgentId(stateDir);
-    if (!agentId) {
-      io.stderr.write("no previous task agent to resume — starting fresh\n");
-      agent = await createAgent(agentOpts);
-    } else {
-      try {
-        agent = await resumeAgent(agentId, agentOpts);
-      } catch (err) {
-        io.stderr.write(
-          `resume failed (${err instanceof Error ? err.message : String(err)}); starting fresh\n`,
-        );
-        agent = await createAgent(agentOpts);
-      }
-    }
-  } else {
-    agent = await createAgent(agentOpts);
+  let agent: Awaited<ReturnType<typeof resumeAgent>>;
+  try {
+    agent = await resumeAgent(agentId, buildAgentOptionsForFlags(flags, workspaceRoot));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    markFailed(stateDir, job.id, `resume failed for ${agentId}: ${message}`);
+    throw err;
   }
 
   if (flags.background) {
@@ -219,18 +288,14 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
 }
 
 /**
- * Background mode: kick off the run, persist its events to the per-job log,
- * and return immediately. The CLI process keeps running until the IIFE
- * resolves (Node won't exit while a Promise is pending), so the run
- * actually completes — but stdout was already returned to the user. Cancel
- * of a background run from a different CLI invocation falls back to
- * `run-not-active` + persisted-mark since the Run object is in this process
- * only.
+ * Background mode: same shape as task.detachBackgroundRun. Routes both stdout
+ * and stderr renderings into the per-job log so the caller (which has already
+ * exited) can replay them via `/cursor:result --log`.
  */
 function detachBackgroundRun(
-  agent: Awaited<ReturnType<typeof createAgent>>,
+  agent: Awaited<ReturnType<typeof resumeAgent>>,
   prompt: string,
-  flags: TaskFlags,
+  flags: RunFlags,
   stateDir: string,
   jobId: string,
 ): void {

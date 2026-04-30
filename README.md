@@ -12,6 +12,7 @@ targets Cursor instead of Codex.
 |---------------|--------------|
 | `/cursor:setup` | Verify Node, `CURSOR_API_KEY`, account, model catalog. Toggle the Stop review gate. |
 | `/cursor:task <prompt>` | Send an implementation task to Cursor (read-only by default; pass `--write` to allow edits). |
+| `/cursor:resume <agent-id\|--last\|--list> [prompt]` | Reattach to an existing Cursor agent and continue the conversation. |
 | `/cursor:review` | Structured review of the working-tree diff (`approve` / `needs-attention` + findings). |
 | `/cursor:adversarial-review` | Same shape, but the agent challenges design choices instead of hunting defects. |
 | `/cursor:status [job-id]` | List recent jobs (or show one in detail). |
@@ -83,6 +84,21 @@ The gate is per-workspace and disabled by default. State lives in
 | `--model <id>` | Override the default model (`composer-2`). |
 | `--timeout <ms>` | Cancel if the run exceeds this duration. |
 | `--json` | Emit the final result as a single JSON line. |
+
+`resume`:
+
+| Flag | Effect |
+|------|--------|
+| `--last` | Resume the most recent task agent for this workspace (skip `<agent-id>`). |
+| `--list` | Print known agent ids for this workspace, then exit. |
+| `--limit <n>` | With `--list`: cap the number of rows (default 10). |
+| `--write`, `--background`, `--force`, `--cloud`, `--model <id>`, `--timeout <ms>`, `--json` | Same as `task`. |
+
+```text
+/cursor:resume --list                       # discover agent ids
+/cursor:resume agent-abc123 "now do X"      # continue a specific agent
+/cursor:resume --last "and then Y" --write  # follow up on the most recent run
+```
 
 `review` / `adversarial-review`:
 

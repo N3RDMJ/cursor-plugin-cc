@@ -584,6 +584,81 @@ Behavior:
 
 ---
 
+## Phase 8: `/cursor:resume` Command
+
+Surface `Agent.resume()` as a first-class slash command. Until Phase 8, the
+durable-agent capability was reachable only through `task --resume-last` —
+which always picked the most recent agent and offered no discovery story.
+
+### 8.1 Job-control discovery helper
+
+- [x] `findRecentTaskAgents(stateDir, limit?, lookahead?)` in `lib/job-control.mts`
+      returns `{ jobId, agentId, createdAt, summary? }[]` for the most-recent
+      task jobs that have a stamped `agentId`. Reads at most `lookahead` job
+      json files to find `limit` results.
+- [x] `task --resume-last` rewired to use the new helper (drops its inline
+      `findResumeAgentId`).
+
+### 8.2 `resume` Subcommand
+
+```bash
+cursor-companion resume <agent-id> <prompt> [flags]
+cursor-companion resume --last <prompt> [flags]
+cursor-companion resume --list [--limit <n>] [--json]
+```
+
+- [x] `commands/resume.mts` handler with parser that accepts either a
+      positional `<agent-id> <prompt>` pair, `--last <prompt>`, or
+      `--list` (no prompt; returns and exits)
+- [x] `--list` reads `findRecentTaskAgents(stateDir, limit)` and renders
+      either a fixed-width table (`AGENT-ID / JOB-ID / CREATED / SUMMARY`)
+      or a JSON array via `--json`
+- [x] Run path mirrors `task` (write policy, `buildPrompt`, streaming via
+      `toAgentEvents` + `renderStreamEvent`, job tracking via `markRunning`/
+      `markFinished`/`markFailed`, agent dispose in `finally`)
+- [x] Inherits `--write` / `--background` / `--force` / `--cloud` /
+      `--model` / `--timeout` / `--json` from the task surface
+- [x] Stamps `metadata: { resumed: true, resumedAgentId }` on the new job
+      record so `/cursor:status <id>` shows the resume lineage
+- [x] `Agent.resume` failures are recorded via `markFailed` before re-throw
+      so the job record reflects the failed attempt
+
+### 8.3 Plugin Wiring
+
+- [x] `cursor-companion.mts` router routes `resume` → `runResume` and adds
+      it to the help banner
+- [x] `commands/resume.md` slash command markdown (`disable-model-invocation:
+      true`, `allowed-tools: Bash(node:*)`) shells out and surfaces output
+      verbatim — same pattern as `/cursor:status`, `/cursor:cancel`,
+      `/cursor:result`
+- [x] `--list` is the discovery surface; `/cursor:status` table left
+      unchanged (no `agentId` column) to avoid a schema migration on
+      `JobIndexEntry`
+
+### 8.4 Tests
+
+- [x] `tests/unit/lib/job-control.test.mts` — `findRecentTaskAgents`:
+      empty / no agentId, ordering newest-first, `limit` cap, ignores
+      non-task types
+- [x] `tests/cli/resume.test.mts` — explicit agent-id, `--last`,
+      `--last` with no agents, `--list` (text + json + empty), `--write`,
+      `--background`, missing positional, missing prompt, conflicting
+      `--list --last`, `--limit` without `--list`, non-finished exit code,
+      `Agent.resume` rejection persisting a failed job
+- [x] `tests/unit/cli/companion.test.mts` — router help/usage smoke tests
+      for the new subcommand
+
+### 8.5 Documentation
+
+- [x] `README.md` commands table + a new `resume` flags table
+- [x] `PLAN.md` — this section
+
+**Exit criteria**: `/cursor:resume` discovers and reattaches to durable
+agents from any prior session in the workspace; tests cover the full flag
+surface and the failure paths.
+
+---
+
 ## Implementation Order
 
 ```
@@ -594,6 +669,7 @@ Phase 4 (plugin wiring)   ████████░░  ~3 hours
 Phase 5 (testing)         ██████████  ~4 hours
 Phase 6 (review gate)     ██████████  ~2 hours (v2)
 Phase 7 (polish/publish)  ██████████  ~3 hours
+Phase 8 (resume command)  ██████████  ~1 hour
 ```
 
 Phases 1–4 are the critical path. Phase 5 runs alongside 3–4 (write tests as you build). Phase 6 is a clean follow-up. Phase 7 is final polish.

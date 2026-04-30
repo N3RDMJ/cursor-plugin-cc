@@ -121,6 +121,41 @@ export function listJobs(stateDir: string, filter: ListJobsFilter = {}): JobInde
   return entries;
 }
 
+export interface RecentTaskAgent {
+  jobId: string;
+  agentId: string;
+  createdAt: string;
+  summary?: string;
+}
+
+/**
+ * Walk the most-recent task jobs (newest first) and return entries that have
+ * a stamped agentId. Used by `task --resume-last` and `/cursor:resume`
+ * (`--last` / `--list`). Reads at most `lookahead` job json files from disk
+ * to find `limit` agentIds.
+ */
+export function findRecentTaskAgents(
+  stateDir: string,
+  limit: number = 10,
+  lookahead: number = Math.max(limit * 2, 20),
+): RecentTaskAgent[] {
+  const recent = listJobs(stateDir, { type: "task", limit: lookahead });
+  const out: RecentTaskAgent[] = [];
+  for (const entry of recent) {
+    if (out.length >= limit) break;
+    const job = readJob(stateDir, entry.id);
+    if (!job?.agentId) continue;
+    const ref: RecentTaskAgent = {
+      jobId: job.id,
+      agentId: job.agentId,
+      createdAt: job.createdAt,
+    };
+    if (entry.summary) ref.summary = entry.summary;
+    out.push(ref);
+  }
+  return out;
+}
+
 interface UpdateInput {
   status?: JobStatus;
   startedAt?: string;

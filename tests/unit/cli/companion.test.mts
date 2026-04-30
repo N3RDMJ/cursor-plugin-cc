@@ -89,6 +89,18 @@ describe("cursor-companion router", () => {
     expect(await companionMain(argv("status", "--type", "task"), io)).toBe(0);
   });
 
+  it("resume without args exits 2 (UsageError)", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("resume requires <agent-id>");
+  });
+
+  it("--help on resume prints subcommand help and exits 0", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--help"), io)).toBe(0);
+    expect(io.captured.stdout.join("")).toContain("Reattach to an existing Cursor agent");
+  });
+
   it("setup without API key exits 1 with diagnostic", async () => {
     const io = captureIO(workDir);
     const original = process.env.CURSOR_API_KEY;
