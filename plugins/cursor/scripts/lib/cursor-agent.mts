@@ -16,6 +16,7 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 
+import { detectCloudRepository } from "./git.mjs";
 import { type RetryOptions, withRetry } from "./retry.mjs";
 
 export const DEFAULT_MODEL: ModelSelection = { id: "composer-2" };
@@ -124,6 +125,15 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
   "Keep progress updates concise and summarize the result clearly at the end.",
 ].join("\n");
 
+export const WRITE_POLICY = "You may modify files in the workspace.";
+
+export const READ_ONLY_POLICY =
+  "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
+
+export function writePolicyText(write: boolean): string {
+  return write ? WRITE_POLICY : READ_ONLY_POLICY;
+}
+
 /**
  * Wrap a user prompt with system instructions. Callers that need raw prompts
  * (e.g. structured-output review) can skip this and pass the prompt directly
@@ -132,6 +142,30 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
 export function buildPrompt(prompt: string, instructions?: string): string {
   const sys = instructions ?? DEFAULT_AGENT_INSTRUCTIONS;
   return `${sys}\n\nUser task:\n${prompt}`;
+}
+
+/**
+ * Build `CursorAgentOptions` from the subset of flags that command parsers
+ * expose to the user (`--model`, `--cloud`). Centralized so task and resume
+ * don't carry byte-identical copies. Cloud mode auto-detects the repo via
+ * `detectCloudRepository(workspaceRoot)`.
+ */
+export interface AgentOptionFlagInputs {
+  model?: ModelSelection;
+  cloud?: boolean;
+}
+
+export function buildAgentOptionsFromFlags(
+  workspaceRoot: string,
+  flags: AgentOptionFlagInputs,
+): CursorAgentOptions {
+  const opts: CursorAgentOptions = { cwd: workspaceRoot };
+  if (flags.model) opts.model = flags.model;
+  if (flags.cloud) {
+    opts.mode = "cloud";
+    opts.cloudRepo = detectCloudRepository(workspaceRoot);
+  }
+  return opts;
 }
 
 function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {

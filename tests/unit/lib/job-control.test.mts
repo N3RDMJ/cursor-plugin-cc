@@ -7,6 +7,7 @@ import type { CursorRunResult } from "../../../plugins/cursor/scripts/lib/cursor
 import {
   cancelJob,
   createJob,
+  findRecentTaskAgents,
   getActiveRun,
   getJob,
   listJobs,
@@ -191,6 +192,39 @@ describe("cancelJob", () => {
     expect(r.cancelled).toBe(false);
     expect(r.reason).toBe("already finished");
     unregisterActiveRun(job.id);
+  });
+});
+
+describe("findRecentTaskAgents", () => {
+  it("returns empty when there are no task jobs with agent ids", () => {
+    expect(findRecentTaskAgents(stateDir)).toEqual([]);
+    createJob(stateDir, { type: "task", prompt: "no-agent-yet" });
+    expect(findRecentTaskAgents(stateDir)).toEqual([]);
+  });
+
+  it("returns task jobs with agent ids, newest first, capped by limit", async () => {
+    const a = createJob(stateDir, { type: "task", prompt: "first" });
+    markRunning(stateDir, a.id, { agentId: "agent-a", runId: "run-a" });
+    await new Promise((r) => setTimeout(r, 5));
+    const b = createJob(stateDir, { type: "task", prompt: "second" });
+    markRunning(stateDir, b.id, { agentId: "agent-b", runId: "run-b" });
+    await new Promise((r) => setTimeout(r, 5));
+    const c = createJob(stateDir, { type: "task", prompt: "third" });
+    markRunning(stateDir, c.id, { agentId: "agent-c", runId: "run-c" });
+
+    const all = findRecentTaskAgents(stateDir, 5);
+    expect(all.map((r) => r.agentId)).toEqual(["agent-c", "agent-b", "agent-a"]);
+    expect(all[0]?.summary).toBe("third");
+
+    const top1 = findRecentTaskAgents(stateDir, 1);
+    expect(top1).toHaveLength(1);
+    expect(top1[0]?.agentId).toBe("agent-c");
+  });
+
+  it("ignores non-task jobs", () => {
+    const r = createJob(stateDir, { type: "review", prompt: "diff" });
+    markRunning(stateDir, r.id, { agentId: "agent-review", runId: "run-r" });
+    expect(findRecentTaskAgents(stateDir)).toEqual([]);
   });
 });
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { runCancel } from "./commands/cancel.mjs";
 import { runResult } from "./commands/result.mjs";
+import { runResume } from "./commands/resume.mjs";
 import { runReview } from "./commands/review.mjs";
 import { runSetup } from "./commands/setup.mjs";
 import { runStatus } from "./commands/status.mjs";
@@ -21,6 +22,8 @@ const HELP = `cursor-companion <command> [args]
 
 commands:
   task <prompt>          Delegate an implementation task to Cursor
+  resume <agent-id|--last|--list> [prompt]
+                         Reattach to an existing Cursor agent and continue
   review                 Review the current diff
   adversarial-review     Challenge design choices, not just defects
   status [<job-id>]      Show job table or single job detail
@@ -47,6 +50,8 @@ export async function main(argv: readonly string[], io: CommandIO): Promise<Exit
     switch (command) {
       case "task":
         return await runTask(rest, io);
+      case "resume":
+        return await runResume(rest, io);
       case "review":
         return await runReview(rest, io, { adversarial: false });
       case "adversarial-review":

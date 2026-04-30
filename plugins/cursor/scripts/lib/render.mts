@@ -176,7 +176,12 @@ function rowsFromJobs(jobs: JobIndexEntry[], now: number): JobTableRow[] {
   });
 }
 
-function formatAge(ms: number): string {
+/**
+ * Compact age string for table columns: `12s` / `5m` / `3h` / `7d`. Returns
+ * `?` for invalid/negative inputs so the table never crashes on unparseable
+ * timestamps.
+ */
+export function formatAge(ms: number): string {
   if (!Number.isFinite(ms) || ms < 0) return "?";
   const sec = Math.floor(ms / 1000);
   if (sec < 60) return `${sec}s`;
@@ -185,6 +190,12 @@ function formatAge(ms: number): string {
   const hr = Math.floor(min / 60);
   if (hr < 24) return `${hr}h`;
   return `${Math.floor(hr / 24)}d`;
+}
+
+/** Convert an ISO timestamp to a relative age string (returns `?` if unparseable). */
+export function ageFromIso(iso: string, now: number = Date.now()): string {
+  const t = Date.parse(iso);
+  return Number.isFinite(t) ? formatAge(now - t) : "?";
 }
 
 /**
