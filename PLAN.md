@@ -533,34 +533,54 @@ Behavior:
 
 ### 7.1 Documentation
 
-- [ ] `README.md` — what it does, installation, configuration, commands, examples
-- [ ] `CONTRIBUTING.md` — dev setup, testing, PR conventions
-- [ ] Inline JSDoc on public API surfaces (module-level only, not every function)
+- [x] `README.md` — what it does, installation, configuration, commands, examples
+- [x] `CONTRIBUTING.md` — dev setup, testing, PR conventions, release process
+- [x] Module-level JSDoc on public API surfaces — already in place across `lib/`
+      (cursor-agent, render, state, job-control, git, gate, retry, redact);
+      Phase 7 just added headers on the new modules.
 
 ### 7.2 CI/CD
 
-- [ ] GitHub Actions workflow:
-  - PR checks: lint → typecheck → build → unit tests
-  - Main branch: + integration tests (with API key secret)
-  - Release: npm publish on tag push
-- [ ] Commitlint + husky for conventional commit enforcement
-- [ ] Dependabot or Renovate for dependency updates
+- [x] GitHub Actions workflow:
+  - [x] PR checks: lint → typecheck → build → unit tests (existing `check` job)
+  - [x] Main branch: integration tests when `CURSOR_API_KEY` secret is set
+  - ~~Release: npm publish on tag push~~ — N/A. The package is `private: true`
+        and ships via `.claude-plugin/marketplace.json`, not npm. Release
+        process documented in `CONTRIBUTING.md`.
+- [x] Conventional-commit enforcement via husky `commit-msg` hook (inline regex,
+      no commitlint dep — mirrors the project's lean toolchain choice)
+- [x] Dependabot config (`.github/dependabot.yml`) — weekly npm + monthly
+      github-actions, dev-deps grouped, `chore`/`ci` commit prefixes
 
 ### 7.3 Plugin Registry
 
-- [ ] Publish to Claude Code plugin marketplace
-- [ ] Installation: `/plugin install cursor-plugin-cc`
-- [ ] Verify clean install experience: setup wizard, API key prompt, first review
+- [x] Marketplace manifest (`.claude-plugin/marketplace.json`) ready for
+      `/plugin marketplace add` + `/plugin install cursor@cursor-plugin-cc`
+- [x] Install + first-run flow documented in `README.md` (export key →
+      `/cursor:setup` → first task/review)
+- [ ] Publish to a public Claude Code plugin registry — out of scope for an
+      automated change; tag a release per `CONTRIBUTING.md` and the install
+      command above resolves from the tagged ref.
 
 ### 7.4 Hardening
 
-- [ ] Graceful degradation when Cursor API is down or rate-limited
-- [ ] Retry logic with exponential backoff for transient failures
-- [ ] Timeout enforcement on all SDK calls
-- [ ] Secure API key handling (never logged, never in job state files)
-- [ ] Memory leak prevention: ensure all agents are disposed, streams are consumed
+- [x] Graceful degradation when Cursor API is down or rate-limited — short
+      account/catalog calls go through `withRetry` (3 attempts, exponential
+      backoff, capped at 4s)
+- [x] Retry logic with exponential backoff for transient failures — `lib/retry.mts`,
+      keys off `error.isRetryable` (the SDK's transient marker)
+- [x] Timeout enforcement on all SDK calls — `sendTask` / `oneShot` honor
+      `timeoutMs`; `whoami` / `listModels` / `validateModel` are wrapped in
+      retry (their own per-attempt deadline lives in the SDK)
+- [x] Secure API key handling — `lib/redact.mts` scrubs `CURSOR_API_KEY` from
+      `renderError` (stderr), `markFailed` (persisted job json), and
+      `logJobLine` (per-job .log files). Never written to disk by design.
+- [x] Memory leak prevention — every agent path disposes via `Symbol.asyncDispose`
+      in a `finally` block (`task.runTask`, `task.detachBackgroundRun`,
+      `oneShot`); streams are fully consumed before `run.wait()` resolves so
+      no dangling iterators
 
-**Exit criteria**: Plugin installable from marketplace, README covers all commands, CI green on main.
+**Exit criteria**: Plugin installable from marketplace, README covers all commands, CI green on main. ✅ (all Phase 7 implementation items complete; 217 tests pass + 3 live-integration tests auto-skip without `CURSOR_API_KEY`; final marketplace publish pending a release tag).
 
 ---
 

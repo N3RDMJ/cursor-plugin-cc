@@ -457,6 +457,25 @@ describe("Cursor account helpers", () => {
     expect(sdkMocks.cursorMe).toHaveBeenCalledWith({ apiKey: "test-key" });
   });
 
+  it("whoami retries transient errors and resolves on a later attempt", async () => {
+    const transient = Object.assign(new Error("rate limited"), { isRetryable: true });
+    sdkMocks.cursorMe
+      .mockRejectedValueOnce(transient)
+      .mockResolvedValueOnce({ apiKeyName: "test", createdAt: "0" });
+
+    await expect(whoami({ retry: { sleep: async () => undefined } })).resolves.toMatchObject({
+      apiKeyName: "test",
+    });
+    expect(sdkMocks.cursorMe).toHaveBeenCalledTimes(2);
+  });
+
+  it("whoami does not retry non-retryable errors", async () => {
+    const auth = Object.assign(new Error("invalid key"), { isRetryable: false });
+    sdkMocks.cursorMe.mockRejectedValue(auth);
+    await expect(whoami()).rejects.toBe(auth);
+    expect(sdkMocks.cursorMe).toHaveBeenCalledTimes(1);
+  });
+
   it("listModels returns the SDK list", async () => {
     const list: SDKModel[] = [{ id: "composer-2", displayName: "Composer 2" }];
     sdkMocks.modelsList.mockResolvedValue(list);

@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Enforce conventional-commits format. Implemented inline (no commitlint dep)
+# to match the project's lean dev-toolchain choices.
+#
+#   <type>[optional scope][!]: <description>
+#
+# Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert,
+# style, test. Merge commits are exempt.
+
+set -e
+
+msg_file="$1"
+first_line=$(head -n1 "$msg_file")
+
+# Skip merges, reverts, fixups, and squashes — they have their own format.
+case "$first_line" in
+  "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "amend! "*) exit 0 ;;
+esac
+
+pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?!?: .+'
+if ! printf '%s' "$first_line" | grep -Eq "$pattern"; then
+  printf 'commit-msg: subject must follow conventional-commits format\n' >&2
+  printf '  expected: <type>(scope)?: <description>\n' >&2
+  printf '  types: build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test\n' >&2
+  printf '  got:   %s\n' "$first_line" >&2
+  exit 1
+fi

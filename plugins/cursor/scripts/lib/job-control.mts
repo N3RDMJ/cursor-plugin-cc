@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { Run } from "@cursor/sdk";
 
 import { type CursorRunResult, cancelRun } from "./cursor-agent.mjs";
+import { redactApiKey } from "./redact.mjs";
 import {
   appendJobLog,
   type JobIndex,
@@ -203,12 +204,16 @@ export function markFinished(stateDir: string, jobId: string, result: CursorRunR
   return update(stateDir, jobId, updates);
 }
 
-/** Mark a job as failed, recording the error message. */
+/**
+ * Mark a job as failed, recording the error message. Scrubs `CURSOR_API_KEY`
+ * before persistence so a thrown SDK error that happens to embed the key in
+ * a request URL doesn't end up on disk in the per-job json file.
+ */
 export function markFailed(stateDir: string, jobId: string, error: string): JobRecord {
   return update(stateDir, jobId, {
     status: "failed",
     finishedAt: nowIso(),
-    error,
+    error: redactApiKey(error),
   });
 }
 
@@ -278,9 +283,14 @@ export async function cancelJob(stateDir: string, jobId: string): Promise<Cancel
   return { cancelled: true, ...(result.reason ? { reason: result.reason } : {}), job: updated };
 }
 
-/** Append a line to the per-job streaming log. */
+/**
+ * Append a line to the per-job streaming log. Defensive: scrubs the API key
+ * even though stream events normally carry only LLM-emitted text — it's cheap
+ * and removes a class of "did the model echo my key back?" worries.
+ */
 export function logJobLine(stateDir: string, jobId: string, line: string): void {
-  const text = line.endsWith("\n") ? line : `${line}\n`;
+  const scrubbed = redactApiKey(line);
+  const text = scrubbed.endsWith("\n") ? scrubbed : `${scrubbed}\n`;
   appendJobLog(stateDir, jobId, text);
 }
 

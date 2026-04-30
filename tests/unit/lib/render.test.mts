@@ -209,4 +209,16 @@ describe("renderError", () => {
     expect(renderError("plain")).toBe("error: plain\n");
     expect(renderError(42)).toBe("error: 42\n");
   });
+
+  it("scrubs CURSOR_API_KEY from error messages", () => {
+    const original = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = "key_supersecret_token_12345";
+    try {
+      const err = new Error("auth failed for key_supersecret_token_12345");
+      expect(renderError(err)).toBe("error: auth failed for [REDACTED]\n");
+    } finally {
+      if (original === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = original;
+    }
+  });
 });
