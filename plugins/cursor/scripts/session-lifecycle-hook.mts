@@ -20,6 +20,10 @@ interface SessionStartPayload {
 }
 
 function readStdinSync(): string {
+  // readFileSync(0) blocks on a TTY waiting for input. Claude Code always
+  // pipes JSON via stdin for hooks, but a developer running the hook by hand
+  // would otherwise hang forever — guard the interactive case.
+  if (process.stdin.isTTY) return "";
   try {
     return readFileSync(0, "utf8");
   } catch {

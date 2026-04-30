@@ -150,11 +150,11 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
   const writePolicy = flags.write
     ? "You may modify files in the workspace."
     : "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
-  const fullPrompt = buildPrompt(
-    [buildContextHeader(workspaceRoot), "", writePolicy, "", flags.prompt]
-      .filter((line) => line.length > 0 || line === "")
-      .join("\n"),
-  );
+  // Skip local-workspace context in cloud mode: the cloud agent runs against
+  // `startingRef` of the remote, so local uncommitted state would mislead it.
+  const contextHeader = flags.cloud ? "" : buildContextHeader(workspaceRoot);
+  const sections = [contextHeader, writePolicy, flags.prompt].filter((s) => s.length > 0);
+  const fullPrompt = buildPrompt(sections.join("\n\n"));
 
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
 

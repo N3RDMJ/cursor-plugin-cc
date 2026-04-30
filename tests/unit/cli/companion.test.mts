@@ -78,6 +78,25 @@ describe("cursor-companion router", () => {
     expect(io.captured.stdout.join("")).toContain("Delegate an implementation task");
   });
 
+  it("status rejects invalid --type with a helpful error", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("status", "--type", "bogus"), io)).toBe(1);
+    const err = io.captured.stderr.join("");
+    expect(err).toContain("invalid --type");
+    expect(err).toContain("task");
+  });
+
+  it("status rejects invalid --status with a helpful error", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("status", "--status", "weird"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("invalid --status");
+  });
+
+  it("status accepts a valid --type filter", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("status", "--type", "task"), io)).toBe(0);
+  });
+
   it("setup without API key exits 1 with diagnostic", async () => {
     const io = captureIO(workDir);
     const original = process.env.CURSOR_API_KEY;

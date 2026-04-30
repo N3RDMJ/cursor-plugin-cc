@@ -5,6 +5,9 @@ import { renderJobTable } from "../lib/render.mjs";
 import { type JobStatus, type JobType, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
+const VALID_TYPES = new Set<string>(["task", "review", "adversarial-review"]);
+const VALID_STATUSES = new Set<string>(["pending", "running", "completed", "failed", "cancelled"]);
+
 const HELP = `cursor-companion status [<job-id>] [flags]
 
 Show the job table for the current workspace, or detail for one job.
@@ -55,9 +58,21 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
 
   const filter: ListJobsFilter = {};
   const type = optionalString(parsed, "type");
-  if (type) filter.type = type as JobType;
+  if (type) {
+    if (!VALID_TYPES.has(type)) {
+      throw new Error(`invalid --type: ${type} (expected one of ${[...VALID_TYPES].join(", ")})`);
+    }
+    filter.type = type as JobType;
+  }
   const status = optionalString(parsed, "status");
-  if (status) filter.status = status as JobStatus;
+  if (status) {
+    if (!VALID_STATUSES.has(status)) {
+      throw new Error(
+        `invalid --status: ${status} (expected one of ${[...VALID_STATUSES].join(", ")})`,
+      );
+    }
+    filter.status = status as JobStatus;
+  }
   const limit = optionalString(parsed, "limit");
   if (limit) {
     const n = Number(limit);
