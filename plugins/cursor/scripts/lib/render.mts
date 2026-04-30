@@ -1,4 +1,5 @@
 import type { AgentEvent } from "./cursor-agent.mjs";
+import { redactError } from "./redact.mjs";
 import type { JobIndexEntry } from "./state.mjs";
 
 /**
@@ -286,8 +287,11 @@ export function renderReviewResult(review: ReviewOutput): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Consistent error formatting for CLI failures. */
+/**
+ * Consistent error formatting for CLI failures. Scrubs `CURSOR_API_KEY` from
+ * the message before rendering — SDK errors occasionally carry the request URL
+ * (with the key in a query parameter) inside `Error.cause`.
+ */
 export function renderError(error: unknown): string {
-  if (error instanceof Error) return `error: ${error.message}\n`;
-  return `error: ${String(error)}\n`;
+  return `error: ${redactError(error)}\n`;
 }

@@ -16,6 +16,8 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 
+import { type RetryOptions, withRetry } from "./retry.mjs";
+
 export const DEFAULT_MODEL: ModelSelection = { id: "composer-2" };
 
 export type CursorAgentStatus = "finished" | "error" | "cancelled" | "expired";
@@ -85,8 +87,13 @@ export interface CancelResult {
   reason?: string;
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   apiKey?: string;
+  /**
+   * Override the default retry policy used for short-lived SDK calls
+   * (whoami, listModels, validateModel). Pass `{ attempts: 1 }` to disable.
+   */
+  retry?: RetryOptions;
 }
 
 /**
@@ -230,13 +237,19 @@ export async function downloadArtifact(agent: SDKAgent, path: string): Promise<B
   return agent.downloadArtifact(path);
 }
 
-/** Verify CURSOR_API_KEY by hitting the account endpoint. */
+/**
+ * Verify CURSOR_API_KEY by hitting the account endpoint. Retries transient
+ * network/rate-limit errors via `withRetry`; auth failures (401) propagate
+ * unchanged because the SDK marks them non-retryable.
+ */
 export async function whoami(opts: RequestOptions = {}): Promise<SDKUser> {
-  return Cursor.me({ apiKey: resolveApiKey(opts.apiKey) });
+  const apiKey = resolveApiKey(opts.apiKey);
+  return withRetry(() => Cursor.me({ apiKey }), opts.retry);
 }
 
 export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]> {
-  return Cursor.models.list({ apiKey: resolveApiKey(opts.apiKey) });
+  const apiKey = resolveApiKey(opts.apiKey);
+  return withRetry(() => Cursor.models.list({ apiKey }), opts.retry);
 }
 
 /** Confirm a ModelSelection.id is in the catalog. Throws on miss. */

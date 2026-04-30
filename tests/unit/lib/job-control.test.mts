@@ -120,6 +120,19 @@ describe("state transitions", () => {
     expect(after.error).toBe("boom");
   });
 
+  it("markFailed scrubs CURSOR_API_KEY from the persisted error", () => {
+    const original = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = "key_persistedsecret_98765";
+    try {
+      const job = createJob(stateDir, { type: "task", prompt: "broken" });
+      const after = markFailed(stateDir, job.id, "auth=key_persistedsecret_98765 failed");
+      expect(after.error).toBe("auth=[REDACTED] failed");
+    } finally {
+      if (original === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = original;
+    }
+  });
+
   it("update of a missing id throws", () => {
     expect(() => markFailed(stateDir, "missing-job", "x")).toThrow(/job not found/);
   });
@@ -187,6 +200,19 @@ describe("logJobLine", () => {
     logJobLine(stateDir, job.id, "hello");
     logJobLine(stateDir, job.id, "world\n");
     expect(readJobLog(stateDir, job.id)).toBe("hello\nworld\n");
+  });
+
+  it("scrubs CURSOR_API_KEY from logged lines before they hit disk", () => {
+    const original = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = "key_loglinesecret_55555";
+    try {
+      const job = createJob(stateDir, { type: "task", prompt: "x" });
+      logJobLine(stateDir, job.id, "tool key_loglinesecret_55555 invoked");
+      expect(readJobLog(stateDir, job.id)).toBe("tool [REDACTED] invoked\n");
+    } finally {
+      if (original === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = original;
+    }
   });
 });
 
