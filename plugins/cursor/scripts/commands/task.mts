@@ -1,15 +1,16 @@
-import type { ModelSelection } from "@cursor/sdk";
+import type { ModelSelection, SDKAgent } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
+  buildAgentOptionsFromFlags,
   buildPrompt,
   type CursorAgentOptions,
   createAgent,
   resumeAgent,
   writePolicyText,
 } from "../lib/cursor-agent.mjs";
-import { detectCloudRepository, getBranch, getRecentCommits } from "../lib/git.mjs";
+import { getBranch, getRecentCommits } from "../lib/git.mjs";
 import { createJob, findRecentTaskAgents } from "../lib/job-control.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -101,18 +102,25 @@ function buildContextHeader(workspaceRoot: string): string {
   return lines.join("\n");
 }
 
-function buildAgentOptionsForFlags(flags: TaskFlags, workspaceRoot: string): CursorAgentOptions {
-  const opts: CursorAgentOptions = { cwd: workspaceRoot };
-  if (flags.model) opts.model = flags.model;
-  if (flags.cloud) {
-    opts.mode = "cloud";
-    opts.cloudRepo = detectCloudRepository(workspaceRoot);
+async function resolveTaskAgent(
+  flags: TaskFlags,
+  stateDir: string,
+  agentOpts: CursorAgentOptions,
+  io: CommandIO,
+): Promise<SDKAgent> {
+  if (!flags.resumeLast) return createAgent(agentOpts);
+  const agentId = findRecentTaskAgents(stateDir, 1)[0]?.agentId;
+  if (!agentId) {
+    io.stderr.write("no previous task agent to resume — starting fresh\n");
+    return createAgent(agentOpts);
   }
-  return opts;
-}
-
-function findResumeAgentId(stateDir: string): string | undefined {
-  return findRecentTaskAgents(stateDir, 1)[0]?.agentId;
+  try {
+    return await resumeAgent(agentId, agentOpts);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    io.stderr.write(`resume failed (${message}); starting fresh\n`);
+    return createAgent(agentOpts);
+  }
 }
 
 export async function runTask(args: readonly string[], io: CommandIO): Promise<ExitCode> {
@@ -141,32 +149,9 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
 
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
 
-  const agentOpts = buildAgentOptionsForFlags(flags, workspaceRoot);
-  let agent: Awaited<ReturnType<typeof createAgent>>;
-  if (flags.resumeLast) {
-    const agentId = findResumeAgentId(stateDir);
-    if (!agentId) {
-      io.stderr.write("no previous task agent to resume — starting fresh\n");
-      agent = await createAgent(agentOpts);
-    } else {
-      try {
-        agent = await resumeAgent(agentId, agentOpts);
-      } catch (err) {
-        io.stderr.write(
-          `resume failed (${err instanceof Error ? err.message : String(err)}); starting fresh\n`,
-        );
-        agent = await createAgent(agentOpts);
-      }
-    }
-  } else {
-    agent = await createAgent(agentOpts);
-  }
-
-  const runFlags = {
-    ...(flags.timeoutMs !== undefined ? { timeoutMs: flags.timeoutMs } : {}),
-    ...(flags.force ? { force: true } : {}),
-    json: flags.json,
-  };
+  const agentOpts = buildAgentOptionsFromFlags(workspaceRoot, flags);
+  const agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);
+  const runFlags = { timeoutMs: flags.timeoutMs, force: flags.force, json: flags.json };
 
   if (flags.background) {
     runAgentTaskBackground({ agent, prompt: fullPrompt, flags: runFlags, stateDir, jobId: job.id });

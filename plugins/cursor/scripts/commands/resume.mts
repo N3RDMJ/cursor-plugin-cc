@@ -1,20 +1,20 @@
-import type { ModelSelection } from "@cursor/sdk";
+import type { ModelSelection, SDKAgent } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
+  buildAgentOptionsFromFlags,
   buildPrompt,
-  type CursorAgentOptions,
   resumeAgent,
   writePolicyText,
 } from "../lib/cursor-agent.mjs";
-import { detectCloudRepository } from "../lib/git.mjs";
 import {
   createJob,
   findRecentTaskAgents,
   markFailed,
   type RecentTaskAgent,
 } from "../lib/job-control.mjs";
+import { ageFromIso, compactText } from "../lib/render.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -143,35 +143,25 @@ function parseFlags(args: readonly string[]): ResumeFlags {
   return flags;
 }
 
-function buildAgentOptionsForFlags(flags: RunFlags, workspaceRoot: string): CursorAgentOptions {
-  const opts: CursorAgentOptions = { cwd: workspaceRoot };
-  if (flags.model) opts.model = flags.model;
-  if (flags.cloud) {
-    opts.mode = "cloud";
-    opts.cloudRepo = detectCloudRepository(workspaceRoot);
-  }
-  return opts;
-}
-
-function renderListText(rows: RecentTaskAgent[]): string {
+function renderListText(rows: RecentTaskAgent[], now: number = Date.now()): string {
   if (rows.length === 0) return "(no resumable agents)\n";
+  const formatted = rows.map((r) => ({
+    agentId: r.agentId,
+    jobId: r.jobId,
+    age: ageFromIso(r.createdAt, now),
+    summary: r.summary ? compactText(r.summary).slice(0, 60) : "",
+  }));
   const widths = {
-    agentId: "agent-id".length,
-    jobId: "job-id".length,
-    created: "created".length,
+    agentId: Math.max("agent-id".length, ...formatted.map((r) => r.agentId.length)),
+    jobId: Math.max("job-id".length, ...formatted.map((r) => r.jobId.length)),
+    age: Math.max("age".length, ...formatted.map((r) => r.age.length)),
   };
-  for (const r of rows) {
-    widths.agentId = Math.max(widths.agentId, r.agentId.length);
-    widths.jobId = Math.max(widths.jobId, r.jobId.length);
-    widths.created = Math.max(widths.created, r.createdAt.length);
-  }
-  const header = `${"AGENT-ID".padEnd(widths.agentId)}  ${"JOB-ID".padEnd(widths.jobId)}  ${"CREATED".padEnd(widths.created)}  SUMMARY`;
-  const separator = `${"-".repeat(widths.agentId)}  ${"-".repeat(widths.jobId)}  ${"-".repeat(widths.created)}  -------`;
-  const body = rows
-    .map((r) => {
-      const line = `${r.agentId.padEnd(widths.agentId)}  ${r.jobId.padEnd(widths.jobId)}  ${r.createdAt.padEnd(widths.created)}  ${r.summary ?? ""}`;
-      return line.trimEnd();
-    })
+  const header = `${"AGENT-ID".padEnd(widths.agentId)}  ${"JOB-ID".padEnd(widths.jobId)}  ${"AGE".padEnd(widths.age)}  SUMMARY`;
+  const separator = `${"-".repeat(widths.agentId)}  ${"-".repeat(widths.jobId)}  ${"-".repeat(widths.age)}  -------`;
+  const body = formatted
+    .map((r) =>
+      `${r.agentId.padEnd(widths.agentId)}  ${r.jobId.padEnd(widths.jobId)}  ${r.age.padEnd(widths.age)}  ${r.summary}`.trimEnd(),
+    )
     .join("\n");
   return `${header}\n${separator}\n${body}\n`;
 }
@@ -221,23 +211,19 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
   const job = createJob(stateDir, {
     type: "task",
     prompt: flags.prompt,
-    metadata: { resumed: true, resumedAgentId: agentId },
+    metadata: { resumedAgentId: agentId },
   });
 
-  let agent: Awaited<ReturnType<typeof resumeAgent>>;
+  let agent: SDKAgent;
   try {
-    agent = await resumeAgent(agentId, buildAgentOptionsForFlags(flags, workspaceRoot));
+    agent = await resumeAgent(agentId, buildAgentOptionsFromFlags(workspaceRoot, flags));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     markFailed(stateDir, job.id, `resume failed for ${agentId}: ${message}`);
     throw err;
   }
 
-  const runFlags = {
-    ...(flags.timeoutMs !== undefined ? { timeoutMs: flags.timeoutMs } : {}),
-    ...(flags.force ? { force: true } : {}),
-    json: flags.json,
-  };
+  const runFlags = { timeoutMs: flags.timeoutMs, force: flags.force, json: flags.json };
 
   if (flags.background) {
     runAgentTaskBackground({ agent, prompt: fullPrompt, flags: runFlags, stateDir, jobId: job.id });

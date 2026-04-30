@@ -76,7 +76,6 @@ describe("CLI: resume", () => {
     const resumeJob = listJobs(stateDir).find((j) => j.summary === "next step");
     expect(resumeJob?.status).toBe("completed");
     const persisted = readJob(stateDir, resumeJob?.id ?? "");
-    expect(persisted?.metadata?.resumed).toBe(true);
     expect(persisted?.metadata?.resumedAgentId).toBe("agent-keep-going");
     expect(persisted?.agentId).toBe("agent-test");
   });

@@ -11,11 +11,6 @@ import {
 } from "./job-control.mjs";
 import { renderStreamEvent } from "./render.mjs";
 
-/**
- * Minimal stdout/stderr surface used by the foreground runner. Defined here
- * (rather than imported from `cursor-companion.mts`) to keep this lib module
- * free of cycles with the CLI router.
- */
 export interface IOSink {
   stdout: NodeJS.WritableStream;
   stderr: NodeJS.WritableStream;
@@ -49,7 +44,7 @@ export async function runAgentTaskForeground(opts: RunAgentTaskOptions): Promise
   const { agent, prompt, flags, io, stateDir, jobId } = opts;
   try {
     const result = await sendTask(agent, prompt, {
-      ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
+      ...(flags.timeoutMs !== undefined ? { timeoutMs: flags.timeoutMs } : {}),
       ...(flags.force ? { force: true } : {}),
       onRunStart: (run) => {
         markRunning(stateDir, jobId, { agentId: run.agentId, runId: run.id });
