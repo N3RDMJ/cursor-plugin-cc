@@ -485,18 +485,47 @@ After core delegation is solid, add the auto-review gate.
 | Review gate | `Stop` | `stop-review-gate-hook.mjs` | 900s |
 
 Behavior:
-- Fires when Claude Code is about to stop
-- Collects diff of changes Claude made this turn
-- Sends to Cursor agent for independent review
-- Returns JSON: `{ "decision": "block" | "allow", "reason": "..." }`
-- If blocked: Claude sees the review findings and must address them before stopping
+- [x] Fires when Claude Code is about to stop (always-installed hook;
+      short-circuits to "allow" when the per-workspace gate config is off)
+- [x] Collects working-tree diff of changes Claude made this turn
+      (`getDiff(workspaceRoot)`)
+- [x] Sends to Cursor agent for independent review using a strict
+      structured-output contract (same schema as `/cursor:review`)
+- [x] Outputs JSON `{ "decision": "block", "reason": "<formatted findings>" }`
+      on `needs-attention`; emits nothing (allow) on `approve`
+- [x] If blocked: Claude sees `formatBlockReason(review)` (verdict + sorted
+      findings + next steps) and must address them before stopping
+- [x] Honors `stop_hook_active: true` — never blocks on the second stop in
+      the same turn (no infinite loops)
+- [x] Fail-open on every infrastructure failure (SDK throw, non-finished
+      run, unparseable JSON) — surfaces a `cursor-plugin-cc gate:` warning
+      to stderr but always allows
 
 ### 6.2 Enable/Disable via Setup
 
-- [ ] `/cursor:setup` gains a toggle: "Enable review gate?" → writes/removes the Stop hook
-- [ ] Gate is opt-in, not default — it adds latency to every stop
+- [x] `/cursor:setup` gains `--enable-gate` / `--disable-gate` flags that
+      mutate `gate.json` in the workspace state dir. The Stop hook itself
+      stays in `hooks/hooks.json` always — the per-workspace config is the
+      kill switch, so we don't have to mutate the user's settings.json.
+- [x] Setup report (text + `--json`) includes the current gate state +
+      workspace root.
+- [x] Gate is opt-in, not default — it adds latency to every stop. Default
+      `gate.json` is `{ enabled: false }`.
 
-**Exit criteria**: Claude Code is blocked from stopping when Cursor finds critical issues. Gate can be toggled on/off.
+### 6.3 Tests
+
+- [x] `tests/unit/lib/gate.test.mts` — read/write/round-trip, malformed
+      payload, negative timeout, non-boolean enabled coercion
+- [x] `tests/cli/stop-review-gate.test.mts` — gate disabled allows; empty
+      diff allows; `stop_hook_active=true` allows; approve allows;
+      needs-attention emits structured `{ decision: "block", reason }`;
+      SDK throw / non-finished run / non-JSON output all fail-open with
+      stderr warning
+- [x] `tests/cli/setup.test.mts` — gate state in default report;
+      `--enable-gate` / `--disable-gate` persist `gate.json`; mutually
+      exclusive flags rejected with exit 2; `--json` includes `gate`
+
+**Exit criteria**: Claude Code is blocked from stopping when Cursor finds critical issues. Gate can be toggled on/off. ✅ (197 tests pass; 3 live-integration tests auto-skip without `CURSOR_API_KEY`).
 
 ---
 
