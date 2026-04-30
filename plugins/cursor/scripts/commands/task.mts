@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+
 import type { ModelSelection, SDKAgent } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
@@ -27,6 +30,9 @@ flags:
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
   --cloud              Use Cursor cloud against the detected GitHub origin
+  --prompt-file <path> Read the prompt from a file. Concatenated with any
+                       positional prompt text (positional first, file body
+                       second, separated by a blank line).
   --model <id>         Override the default model
   -m <id>
   --timeout <ms>       Cancel the run if it exceeds this duration
@@ -48,7 +54,17 @@ interface TaskFlags {
 
 class HelpRequested extends Error {}
 
-function parseFlags(args: readonly string[]): TaskFlags {
+function readPromptFile(cwd: string, path: string): string {
+  const abs = resolvePath(cwd, path);
+  try {
+    return readFileSync(abs, "utf8").trim();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new UsageError(`failed to read --prompt-file ${path}: ${detail}`);
+  }
+}
+
+function parseFlags(args: readonly string[], cwd: string): TaskFlags {
   const parsed = parseArgs(args, {
     long: {
       write: "boolean",
@@ -56,6 +72,7 @@ function parseFlags(args: readonly string[]): TaskFlags {
       background: "boolean",
       force: "boolean",
       cloud: "boolean",
+      "prompt-file": "string",
       model: "string",
       timeout: "string",
       json: "boolean",
@@ -65,8 +82,11 @@ function parseFlags(args: readonly string[]): TaskFlags {
   });
   if (bool(parsed, "help")) throw new HelpRequested();
 
-  const prompt = parsed.positionals.join(" ").trim();
-  if (!prompt) throw new UsageError("task requires a prompt argument");
+  const positionalPrompt = parsed.positionals.join(" ").trim();
+  const promptFilePath = optionalString(parsed, "prompt-file");
+  const filePrompt = promptFilePath ? readPromptFile(cwd, promptFilePath) : "";
+  const prompt = [positionalPrompt, filePrompt].filter((s) => s.length > 0).join("\n\n");
+  if (!prompt) throw new UsageError("task requires a prompt argument or --prompt-file");
 
   const flags: TaskFlags = {
     prompt,
@@ -124,9 +144,10 @@ async function resolveTaskAgent(
 }
 
 export async function runTask(args: readonly string[], io: CommandIO): Promise<ExitCode> {
+  const cwd = io.cwd();
   let flags: TaskFlags;
   try {
-    flags = parseFlags(args);
+    flags = parseFlags(args, cwd);
   } catch (err) {
     if (err instanceof HelpRequested) {
       io.stdout.write(HELP);
@@ -135,7 +156,6 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
     throw err;
   }
 
-  const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
 

@@ -80,6 +80,109 @@ export function getBranch(cwd: string): string | undefined {
   return out;
 }
 
+/**
+ * Detect the repository default branch (`main`, `master`, `trunk`), preferring
+ * a local ref over `origin/<name>`. Returns `undefined` when none of the
+ * conventional names resolve — callers should treat that as "pass an explicit
+ * --base ref or fall back to working-tree review".
+ *
+ * Mirrors the codex-plugin-cc heuristic so review-scope behavior stays in
+ * sync between the two plugins.
+ */
+export function detectDefaultBranch(cwd: string): string | undefined {
+  for (const candidate of ["main", "master", "trunk"]) {
+    const local = runGit(cwd, ["show-ref", "--verify", "--quiet", `refs/heads/${candidate}`]);
+    if (local !== undefined) return candidate;
+    const remote = runGit(cwd, [
+      "show-ref",
+      "--verify",
+      "--quiet",
+      `refs/remotes/origin/${candidate}`,
+    ]);
+    if (remote !== undefined) return `origin/${candidate}`;
+  }
+  return undefined;
+}
+
+export type ReviewScope = "auto" | "working-tree" | "branch";
+
+export interface ReviewTarget {
+  /** "working-tree" → diff against index/HEAD; "branch" → diff against baseRef. */
+  mode: "working-tree" | "branch";
+  /** Set when `mode === "branch"`. */
+  baseRef?: string;
+  /** Human-readable label, e.g. "branch diff against main". */
+  label: string;
+  /** False when auto-resolved, true when the user passed --base or --scope explicitly. */
+  explicit: boolean;
+}
+
+/**
+ * Resolve what a review should diff. Mirrors codex-plugin-cc's `resolveReviewTarget`:
+ *
+ *   - explicit `baseRef`         → branch mode against that ref
+ *   - `scope === "working-tree"` → working-tree (staged + unstaged)
+ *   - `scope === "branch"`       → branch mode against detected default branch
+ *   - `scope === "auto"`         → working-tree if dirty, else branch against default
+ *
+ * Throws on unsupported scope or when branch mode can't find a default branch.
+ */
+export function resolveReviewTarget(
+  cwd: string,
+  options: { scope?: ReviewScope; baseRef?: string } = {},
+): ReviewTarget {
+  const scope = options.scope ?? "auto";
+  const baseRef = options.baseRef;
+
+  if (baseRef) {
+    return { mode: "branch", baseRef, label: `branch diff against ${baseRef}`, explicit: true };
+  }
+
+  if (scope === "working-tree") {
+    return { mode: "working-tree", label: "working tree diff", explicit: true };
+  }
+
+  if (scope === "branch") {
+    const detected = detectDefaultBranch(cwd);
+    if (!detected) {
+      throw new Error(
+        "Unable to detect default branch (looked for main/master/trunk). " +
+          "Pass --base <ref> or use --scope working-tree.",
+      );
+    }
+    return {
+      mode: "branch",
+      baseRef: detected,
+      label: `branch diff against ${detected}`,
+      explicit: true,
+    };
+  }
+
+  if (scope !== "auto") {
+    throw new Error(
+      `Unsupported review scope "${scope}". Use one of: auto, working-tree, branch, or pass --base <ref>.`,
+    );
+  }
+
+  if (isDirty(cwd)) {
+    return { mode: "working-tree", label: "working tree diff", explicit: false };
+  }
+  const detected = detectDefaultBranch(cwd);
+  if (!detected) {
+    return {
+      mode: "working-tree",
+      label: "working tree diff (no default branch)",
+      explicit: false,
+    };
+  }
+  return {
+    mode: "branch",
+    baseRef: detected,
+    label: `branch diff against ${detected}`,
+    explicit: false,
+  };
+}
+
 /** `remote.origin.url` if set; otherwise `undefined`. */
 export function getRemoteUrl(cwd: string): string | undefined {
   return runGit(cwd, ["config", "--get", "remote.origin.url"]) || undefined;

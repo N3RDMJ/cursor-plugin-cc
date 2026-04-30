@@ -17,7 +17,11 @@ Usage:
 
 - `<agent-id> <prompt>` — resume a specific agent with a follow-up prompt
 - `--last <prompt>`     — resume the most recent task agent for this workspace
-- `--list`              — print known agent ids; supports `--limit <n>` and `--json`
+- `--list`              — print known agent ids from the local job index
+- `--list --remote`     — query the SDK for durable agents (local runtime by
+                          default; combine with `--cloud` for cloud-runtime
+                          agents — that needs `CURSOR_API_KEY`)
+- `--limit <n>` and `--json` apply to `--list`
 
 Inherits the same flags as `/cursor:task`: `--write`, `--background`, `--force`,
 `--cloud`, `--model <id>`, `--timeout <ms>`, `--json`.

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   detectCloudRepository,
+  detectDefaultBranch,
   getBranch,
   getChangedFiles,
   getDiff,
@@ -14,6 +15,7 @@ import {
   getStatus,
   isDirty,
   normalizeGitHubRemote,
+  resolveReviewTarget,
 } from "../../../plugins/cursor/scripts/lib/git.mjs";
 
 function git(cwd: string, args: string[]): void {
@@ -158,6 +160,64 @@ describe("git helpers (in a real temp repo)", () => {
   it("detectCloudRepository throws on non-GitHub origins", () => {
     git(repo, ["remote", "add", "origin", "https://gitlab.com/foo/bar"]);
     expect(() => detectCloudRepository(repo)).toThrow(/GitHub/);
+  });
+});
+
+describe("resolveReviewTarget", () => {
+  let repo: string;
+
+  beforeEach(() => {
+    repo = makeRepo();
+    writeFileSync(path.join(repo, "f.txt"), "1\n");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("auto + clean tree → branch mode against detected default branch", () => {
+    const t = resolveReviewTarget(repo, { scope: "auto" });
+    expect(t.mode).toBe("branch");
+    expect(t.baseRef).toBe("main");
+    expect(t.explicit).toBe(false);
+  });
+
+  it("auto + dirty tree → working-tree mode (implicit)", () => {
+    writeFileSync(path.join(repo, "f.txt"), "2\n");
+    const t = resolveReviewTarget(repo, { scope: "auto" });
+    expect(t.mode).toBe("working-tree");
+    expect(t.baseRef).toBeUndefined();
+    expect(t.explicit).toBe(false);
+  });
+
+  it("explicit working-tree forces working-tree even when clean", () => {
+    const t = resolveReviewTarget(repo, { scope: "working-tree" });
+    expect(t.mode).toBe("working-tree");
+    expect(t.explicit).toBe(true);
+  });
+
+  it("explicit baseRef wins over scope", () => {
+    const t = resolveReviewTarget(repo, { scope: "auto", baseRef: "HEAD~0" });
+    expect(t.mode).toBe("branch");
+    expect(t.baseRef).toBe("HEAD~0");
+    expect(t.explicit).toBe(true);
+  });
+
+  it("scope=branch detects default branch", () => {
+    const t = resolveReviewTarget(repo, { scope: "branch" });
+    expect(t.mode).toBe("branch");
+    expect(t.baseRef).toBe("main");
+  });
+
+  it("rejects an unknown scope", () => {
+    // @ts-expect-error testing runtime guard
+    expect(() => resolveReviewTarget(repo, { scope: "yolo" })).toThrow(/Unsupported review scope/);
+  });
+
+  it("detectDefaultBranch returns 'main' for the conventional repo", () => {
+    expect(detectDefaultBranch(repo)).toBe("main");
   });
 });
 

@@ -659,6 +659,108 @@ surface and the failure paths.
 
 ---
 
+## Phase 9: Codex feature parity — review scope, status --wait, prompt-file, durable-agent listing
+
+Close the remaining feature gaps with `openai/codex-plugin-cc`. Each item
+maps to a codex capability we lacked but can implement on top of `@cursor/sdk`
+without new abstractions.
+
+### 9.1 Review scope semantics
+
+- [x] `lib/git.mts` `detectDefaultBranch(cwd)` — picks `main`/`master`/`trunk`,
+      preferring local refs over `origin/<name>`. Mirrors codex heuristic.
+- [x] `lib/git.mts` `resolveReviewTarget(cwd, { scope, baseRef })` returning
+      `{ mode, baseRef?, label, explicit }`. Semantics match codex:
+      explicit `baseRef` → branch; `scope: working-tree` → working-tree;
+      `scope: branch` → branch vs detected default; `scope: auto` (default)
+      → working-tree if dirty else branch vs default. `auto` falls back to
+      working-tree when no default branch is found instead of throwing,
+      so a fresh repo never blocks a review.
+- [x] `commands/review.mts` accepts `--scope <auto|working-tree|branch>`
+      and rejects `--staged --scope branch` as mutually exclusive. Prompt
+      now includes `Review target: <label>`.
+- [x] Adversarial-review accepts free-form positional **focus text**
+      (e.g. `/cursor:adversarial-review concurrency and atomicity`),
+      pumped into the prompt as `Reviewer focus (priority axis): ...`.
+      Plain `/cursor:review` rejects positional args (UsageError, exit 2).
+
+### 9.2 `status --wait`
+
+- [x] `commands/status.mts` accepts `--wait` with `<job-id>`, polling the
+      persisted record until terminal (`completed`/`failed`/`cancelled`).
+      `--timeout-ms <ms>` (default 240000) and `--poll-ms <ms>` (default
+      1000) tune the loop. Timeout exits 1 with the last-known state on
+      stdout. `--wait`/`--timeout-ms`/`--poll-ms` without `<job-id>` is
+      a UsageError.
+
+### 9.3 `task --prompt-file`
+
+- [x] `commands/task.mts` accepts `--prompt-file <path>`, reading the body
+      from disk and concatenating it after any positional prompt
+      (positional first, blank line, file contents). Either source alone
+      is sufficient. Missing file → UsageError.
+
+### 9.4 Durable-agent listing via `Agent.list`
+
+- [x] `lib/cursor-agent.mts` `listRemoteAgents(...)` wraps `Agent.list`
+      with a `RemoteAgentRow` projection (agentId, name, summary,
+      lastModified, status, archived, runtime). Defaults runtime to
+      `local` for the current cwd; pass `runtime: "cloud"` for cloud.
+- [x] `commands/resume.mts` `--list --remote` queries the SDK instead of
+      the local job index. Combine with `--cloud` to list cloud-runtime
+      agents. `--list --json --remote` emits the structured rows.
+      `--remote` without `--list`, and `--list --cloud` without `--remote`,
+      are both UsageErrors.
+- [x] Renderer `renderRemoteListText(rows)` shows
+      AGENT-ID / AGE / STATUS / SUMMARY with the SDK-reported
+      `lastModified` formatted via existing `ageFromIso`.
+
+### 9.5 Tests
+
+- [x] `tests/unit/lib/git.test.mts` — `detectDefaultBranch` + the full
+      `resolveReviewTarget` matrix (auto-clean, auto-dirty, explicit
+      scopes, explicit base, invalid scope).
+- [x] `tests/cli/review.test.mts` — adversarial focus, plain-review
+      rejecting positionals, `--scope working-tree`/`branch`, invalid
+      scope, `--staged --scope branch` mutually exclusive.
+- [x] `tests/cli/status.test.mts` — already-terminal returns immediately,
+      polls until terminal, times out → exit 1, `--json --wait` emits
+      final record.
+- [x] `tests/cli/task.test.mts` — `--prompt-file` body, positional+file
+      concatenation, missing file → exit 2, no prompt + no file → exit 2.
+- [x] `tests/cli/resume.test.mts` — `--list --remote` (text + json),
+      `--list --remote --cloud` switches runtime, `--remote` without
+      `--list` rejected, `--list --cloud` without `--remote` rejected.
+- [x] `tests/unit/cli/companion.test.mts` — `status --wait` without id
+      and `status <missing-id> --wait` smoke tests.
+
+### 9.6 Documentation
+
+- [x] `commands/review.md` — `--scope` flag entry
+- [x] `commands/adversarial-review.md` — focus-text usage
+- [x] `commands/status.md` — `--wait`/`--timeout-ms`/`--poll-ms`
+- [x] `commands/task.md` — mention `--prompt-file`
+- [x] `commands/resume.md` — `--list --remote [--cloud]` discovery
+- [x] `PLAN.md` — this section
+
+### 9.7 Deliberately deferred
+
+- ~~Detached `task-worker` (codex pattern: `spawn(node, ["task-worker"...],
+      { detached: true })`)~~ — current `--background` is in-process; the
+      Cursor SDK keeps the run alive server-side regardless, so the local
+      stream-consumer dying is the only real cost. A true detached worker
+      would require persisting a serialized request payload and reloading
+      it from a child process. Worth its own phase if/when users hit
+      shell-blocking issues on long runs.
+- ~~`task-resume-candidate` (Claude-session-scoped resume discovery)~~ —
+      we don't currently stamp `CLAUDE_SESSION_ID` onto job records.
+      Lift this when a downstream rescue-style command actually needs it.
+
+**Exit criteria**: All five gaps closed; existing 236-test baseline grows
+to cover the new flags; typecheck + lint stay green.
+
+---
+
 ## Implementation Order
 
 ```
@@ -670,6 +772,7 @@ Phase 5 (testing)         ██████████  ~4 hours
 Phase 6 (review gate)     ██████████  ~2 hours (v2)
 Phase 7 (polish/publish)  ██████████  ~3 hours
 Phase 8 (resume command)  ██████████  ~1 hour
+Phase 9 (codex parity)    ██████████  ~2 hours
 ```
 
 Phases 1–4 are the critical path. Phase 5 runs alongside 3–4 (write tests as you build). Phase 6 is a clean follow-up. Phase 7 is final polish.

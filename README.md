@@ -81,6 +81,7 @@ The gate is per-workspace and disabled by default. State lives in
 | `--background` | Start the run, return the job id, exit. |
 | `--force` | Expire any wedged active local run before sending. |
 | `--cloud` | Run against the detected GitHub origin in Cursor's cloud. |
+| `--prompt-file <path>` | Read the prompt body from disk (concatenated after any positional prompt). |
 | `--model <id>` | Override the default model (`composer-2`). |
 | `--timeout <ms>` | Cancel if the run exceeds this duration. |
 | `--json` | Emit the final result as a single JSON line. |
@@ -91,6 +92,7 @@ The gate is per-workspace and disabled by default. State lives in
 |------|--------|
 | `--last` | Resume the most recent task agent for this workspace (skip `<agent-id>`). |
 | `--list` | Print known agent ids for this workspace, then exit. |
+| `--list --remote` | With `--list`: query the SDK for durable agents instead of the local job index. Combine with `--cloud` to list cloud-runtime agents. |
 | `--limit <n>` | With `--list`: cap the number of rows (default 10). |
 | `--write`, `--background`, `--force`, `--cloud`, `--model <id>`, `--timeout <ms>`, `--json` | Same as `task`. |
 
@@ -104,9 +106,24 @@ The gate is per-workspace and disabled by default. State lives in
 
 | Flag | Effect |
 |------|--------|
-| `--staged` | Review only staged changes (`git diff --cached`). |
-| `--base <ref>` | Diff against `<ref>` instead of the working tree. |
+| `--staged` | Review only staged changes (`git diff --cached`). Mutually exclusive with `--scope branch`. |
+| `--scope <auto\|working-tree\|branch>` | `auto` (default) picks working-tree if dirty, else branch vs detected default branch (`main`/`master`/`trunk`). |
+| `--base <ref>` | Diff against `<ref>`. Implies branch scope. |
 | `--model <id>`, `--timeout <ms>`, `--json` | Same as `task`. |
+
+`/cursor:adversarial-review` additionally accepts free-form positional **focus
+text** that becomes the priority axis for the reviewer (e.g.
+`/cursor:adversarial-review concurrency and atomicity`).
+
+`status`:
+
+| Flag | Effect |
+|------|--------|
+| `--type`, `--status`, `--limit <n>` | Filter the job table. |
+| `<job-id> --wait` | Block until the job reaches a terminal state. |
+| `--timeout-ms <ms>` | Max time to wait (default 240000). |
+| `--poll-ms <ms>` | Poll interval (default 1000). |
+| `--json` | Emit JSON instead of the rendered table/detail. |
 
 ## Where state lives
 

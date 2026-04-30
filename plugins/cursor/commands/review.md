@@ -13,8 +13,11 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs review $ARGUMENTS
 ```
 
 Useful flags:
-- `--staged` — review staged changes only (default: working tree)
-- `--base <ref>` — diff against a specific ref instead of HEAD
+- `--staged` — review staged changes only
+- `--scope <auto|working-tree|branch>` — review scope. `auto` (default) picks
+  working-tree when the tree is dirty, otherwise diffs against the detected
+  default branch (`main`/`master`/`trunk`).
+- `--base <ref>` — diff against a specific ref. Implies branch scope.
 - `--json` — emit the structured ReviewOutput JSON unchanged
 
 The CLI prints a verdict (`approve` / `needs-attention`), a summary, and

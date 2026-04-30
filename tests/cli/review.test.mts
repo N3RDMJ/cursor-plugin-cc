@@ -160,4 +160,99 @@ describe("CLI: review", () => {
     expect(prompt).toContain("adversarial reviewer");
     expect(prompt).toContain("challenge design choices");
   });
+
+  it("adversarial-review forwards positional focus text to the prompt", async () => {
+    const run = makeRun({
+      events: [],
+      result: { id: "run-review-6", status: "finished", result: RAW_APPROVE },
+    });
+    const agent = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(agent);
+
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("adversarial-review", "concurrency", "and", "atomicity"), io),
+    ).toBe(0);
+    const prompt = sentPrompt(agent);
+    expect(prompt).toContain("Reviewer focus (priority axis):");
+    expect(prompt).toContain("concurrency and atomicity");
+  });
+
+  it("review rejects positional focus text (only adversarial-review accepts it)", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("review", "look", "at", "auth"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("focus text is only accepted");
+    expect(sdkMocks.agentCreate).not.toHaveBeenCalled();
+  });
+
+  it("--scope working-tree is honored even on a clean tree (forces working-tree mode)", async () => {
+    const run = makeRun({
+      events: [],
+      result: { id: "run-review-scope-wt", status: "finished", result: RAW_APPROVE },
+    });
+    const agent = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(agent);
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("review", "--scope", "working-tree"), io)).toBe(0);
+    const prompt = sentPrompt(agent);
+    expect(prompt).toContain("Review target: working tree diff");
+  });
+
+  it("--scope branch picks the detected default branch as the diff base", async () => {
+    // commit the dirty change so working tree is clean — branch mode then
+    // diffs against detected default branch (master/main)
+    const env = {
+      ...process.env,
+      GIT_COMMITTER_NAME: "Test",
+      GIT_COMMITTER_EMAIL: "t@e",
+      GIT_AUTHOR_NAME: "Test",
+      GIT_AUTHOR_EMAIL: "t@e",
+    };
+    execFileSync("git", ["checkout", "-q", "-b", "feature"], {
+      cwd: workDir,
+      env,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["add", "-A"], { cwd: workDir, env, stdio: "ignore" });
+    execFileSync(
+      "git",
+      ["-c", "commit.gpgsign=false", "commit", "-q", "--no-gpg-sign", "-m", "feat"],
+      { cwd: workDir, env, stdio: "ignore" },
+    );
+
+    const run = makeRun({
+      events: [],
+      result: { id: "run-review-scope-br", status: "finished", result: RAW_APPROVE },
+    });
+    const agent = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(agent);
+
+    const io = captureIO(workDir);
+    try {
+      expect(await companionMain(argv("review", "--scope", "branch"), io)).toBe(0);
+      const prompt = sentPrompt(agent);
+      expect(prompt).toMatch(/Review target: branch diff against (main|master|trunk)/);
+    } finally {
+      // restore master/main as HEAD so other tests in this suite are unaffected
+      execFileSync("git", ["checkout", "-q", "-"], { cwd: workDir, env, stdio: "ignore" });
+      execFileSync("git", ["branch", "-q", "-D", "feature"], {
+        cwd: workDir,
+        env,
+        stdio: "ignore",
+      });
+    }
+  });
+
+  it("--scope rejects an invalid value", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("review", "--scope", "bogus"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("invalid --scope");
+  });
+
+  it("--staged is mutually exclusive with --scope branch", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("review", "--staged", "--scope", "branch"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("--staged is only compatible");
+  });
 });
