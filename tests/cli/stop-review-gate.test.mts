@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Writable } from "node:stream";
 import { NEEDS_ATTENTION_REVIEW, RAW_APPROVE } from "@test/fixtures/reviews.mjs";
+import { captureHookIO } from "@test/helpers/io.mjs";
 import { fakeAgent, makeRun } from "@test/helpers/sdk-mock.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -53,32 +53,7 @@ function initRepo(): void {
   );
 }
 
-interface CapturedIO {
-  readStdin: () => string;
-  stdout: NodeJS.WritableStream;
-  stderr: NodeJS.WritableStream;
-  cwd: () => string;
-  captured: { stdout: string[]; stderr: string[] };
-}
-
-function captureIO(stdin: string, cwdOverride?: string): CapturedIO {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  const sink = (target: string[]): NodeJS.WritableStream =>
-    new Writable({
-      write(chunk, _enc, cb) {
-        target.push(chunk.toString());
-        cb();
-      },
-    });
-  return {
-    readStdin: () => stdin,
-    stdout: sink(stdout),
-    stderr: sink(stderr),
-    cwd: () => cwdOverride ?? workDir,
-    captured: { stdout, stderr },
-  };
-}
+const captureIO = (stdin: string, cwd: string = workDir) => captureHookIO(stdin, cwd);
 
 beforeEach(() => {
   workDir = mkdtempSync(path.join(tmpdir(), "cursor-gate-cwd-"));

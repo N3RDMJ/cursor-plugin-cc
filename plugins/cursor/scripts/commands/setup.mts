@@ -4,7 +4,7 @@ import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, parseArgs, UsageError } from "../lib/args.mjs";
 import { listModels, resolveApiKey, whoami } from "../lib/cursor-agent.mjs";
 import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
-import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
+import { resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const NODE_MIN_MAJOR = 18;
@@ -88,13 +88,18 @@ interface SetupReport {
   gate: { enabled: boolean; workspaceRoot: string };
 }
 
-async function buildReport(workspaceRoot: string, gateEnabled: boolean): Promise<SetupReport> {
+interface BuildReportInput {
+  workspaceRoot: string;
+  gateEnabled: boolean;
+}
+
+async function buildReport(input: BuildReportInput): Promise<SetupReport> {
   const report: SetupReport = {
     node: { ok: nodeMajor() >= NODE_MIN_MAJOR, version: process.versions.node },
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
-    gate: { enabled: gateEnabled, workspaceRoot },
+    gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot },
   };
 
   try {
@@ -174,16 +179,12 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
 
   const workspaceRoot = resolveWorkspaceRoot(io.cwd());
   const stateDir = resolveStateDir(workspaceRoot);
+  const gateEnabled =
+    enableGate || disableGate
+      ? setGateEnabled(stateDir, enableGate).enabled
+      : readGateConfig(stateDir).enabled;
 
-  let gateEnabled: boolean;
-  if (enableGate || disableGate) {
-    ensureStateDir(stateDir);
-    gateEnabled = setGateEnabled(stateDir, enableGate).enabled;
-  } else {
-    gateEnabled = readGateConfig(stateDir).enabled;
-  }
-
-  const report = await buildReport(workspaceRoot, gateEnabled);
+  const report = await buildReport({ workspaceRoot, gateEnabled });
 
   if (bool(parsed, "json")) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

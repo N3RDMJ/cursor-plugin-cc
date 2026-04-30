@@ -1,12 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
-
-import type { ModelSelection } from "@cursor/sdk";
-
 import { parseReview } from "./commands/review.mjs";
-import { oneShot } from "./lib/cursor-agent.mjs";
+import { type OneShotOptions, oneShot } from "./lib/cursor-agent.mjs";
 import { DEFAULT_GATE_TIMEOUT_MS, readGateConfig } from "./lib/gate.mjs";
 import { getDiff, getStatus } from "./lib/git.mjs";
+import { parseHookPayload, readHookStdinSync } from "./lib/hook-payload.mjs";
 import { type ReviewOutput, renderReviewResult } from "./lib/render.mjs";
 import { resolveStateDir } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -65,29 +62,6 @@ const SCHEMA = `{
   "next_steps": string[]
 }`;
 
-function parsePayload(raw: string): StopHookPayload {
-  if (!raw.trim()) return {};
-  try {
-    const data = JSON.parse(raw);
-    if (data && typeof data === "object") return data as StopHookPayload;
-  } catch {
-    // ignore malformed payloads — fail open
-  }
-  return {};
-}
-
-function readStdinSync(): string {
-  // readFileSync(0) blocks on a TTY waiting for input. Claude Code always
-  // pipes JSON via stdin for hooks; guard the interactive case so a
-  // developer running the hook by hand doesn't hang forever.
-  if (process.stdin.isTTY) return "";
-  try {
-    return readFileSync(0, "utf8");
-  } catch {
-    return "";
-  }
-}
-
 function buildPrompt(diff: string, status: string): string {
   return [
     GATE_INSTRUCTIONS,
@@ -122,7 +96,7 @@ export function formatBlockReason(review: ReviewOutput): string {
  * would be interpreted as infrastructure failures by Claude Code).
  */
 export async function main(io: StopHookIO): Promise<number> {
-  const payload = parsePayload(io.readStdin());
+  const payload = parseHookPayload<StopHookPayload>(io.readStdin());
 
   // Avoid infinite loops: if Claude was already blocked once, allow.
   if (payload.stop_hook_active === true) return 0;
@@ -149,11 +123,7 @@ export async function main(io: StopHookIO): Promise<number> {
 
   const prompt = buildPrompt(diff, getStatus(workspaceRoot));
 
-  const oneShotOpts: {
-    cwd: string;
-    timeoutMs: number;
-    model?: ModelSelection;
-  } = {
+  const oneShotOpts: OneShotOptions = {
     cwd: workspaceRoot,
     timeoutMs: config.timeoutMs ?? DEFAULT_GATE_TIMEOUT_MS,
   };
@@ -198,7 +168,7 @@ export async function main(io: StopHookIO): Promise<number> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const code = await main({
-    readStdin: readStdinSync,
+    readStdin: readHookStdinSync,
     stdout: process.stdout,
     stderr: process.stderr,
     cwd: () => process.cwd(),

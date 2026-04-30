@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { parseHookPayload, readHookStdinSync } from "./lib/hook-payload.mjs";
 import {
   clearSession,
   ensureStateDir,
@@ -19,31 +19,8 @@ interface SessionStartPayload {
   source?: string;
 }
 
-function readStdinSync(): string {
-  // readFileSync(0) blocks on a TTY waiting for input. Claude Code always
-  // pipes JSON via stdin for hooks, but a developer running the hook by hand
-  // would otherwise hang forever — guard the interactive case.
-  if (process.stdin.isTTY) return "";
-  try {
-    return readFileSync(0, "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function parseStdin(raw: string): SessionStartPayload {
-  if (!raw.trim()) return {};
-  try {
-    const data = JSON.parse(raw);
-    if (data && typeof data === "object") return data as SessionStartPayload;
-  } catch {
-    // ignore malformed payloads
-  }
-  return {};
-}
-
 function handleSessionStart(): number {
-  const payload = parseStdin(readStdinSync());
+  const payload = parseHookPayload<SessionStartPayload>(readHookStdinSync());
   const cwd = process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
@@ -61,8 +38,8 @@ function handleSessionStart(): number {
 }
 
 function handleSessionEnd(): number {
-  // Reading stdin is harmless if Claude Code didn't send anything.
-  parseStdin(readStdinSync());
+  // Drain stdin so Claude Code's writer never blocks on the pipe.
+  readHookStdinSync();
   const cwd = process.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = resolveStateDir(workspaceRoot);
