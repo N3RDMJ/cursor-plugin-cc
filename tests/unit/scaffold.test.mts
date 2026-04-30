@@ -1,33 +1,45 @@
-import { describe, expect, it, vi } from "vitest";
+import { Writable } from "node:stream";
+import { describe, expect, it } from "vitest";
+
 import { main as companionMain } from "../../plugins/cursor/scripts/cursor-companion.mjs";
 import { main as hookMain } from "../../plugins/cursor/scripts/session-lifecycle-hook.mjs";
 
+function captureIO() {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const sink = (sink: string[]): NodeJS.WritableStream =>
+    new Writable({
+      write(chunk, _enc, cb) {
+        sink.push(chunk.toString());
+        cb();
+      },
+    });
+  return {
+    stdout: sink(stdout),
+    stderr: sink(stderr),
+    cwd: () => process.cwd(),
+    env: process.env,
+    captured: { stdout, stderr },
+  };
+}
+
 describe("cursor-companion CLI", () => {
-  it("prints usage and exits 0 with no args", () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    expect(companionMain(["node", "cursor-companion"])).toBe(0);
-    expect(log).toHaveBeenCalled();
-    log.mockRestore();
+  it("prints usage and exits 0 with no args", async () => {
+    const io = captureIO();
+    expect(await companionMain(["node", "cursor-companion"], io)).toBe(0);
+    expect(io.captured.stdout.join("")).toMatch(/cursor-companion <command>/);
   });
 
-  it("returns 2 for an unknown command", () => {
-    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(companionMain(["node", "cursor-companion", "bogus"])).toBe(2);
-    err.mockRestore();
-  });
-
-  it("returns 1 for a known command (not implemented yet)", () => {
-    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    expect(companionMain(["node", "cursor-companion", "task"])).toBe(1);
-    err.mockRestore();
+  it("returns 2 for an unknown command", async () => {
+    const io = captureIO();
+    expect(await companionMain(["node", "cursor-companion", "bogus"], io)).toBe(2);
+    expect(io.captured.stderr.join("")).toMatch(/unknown command/);
   });
 });
 
 describe("session-lifecycle-hook", () => {
   it("returns 2 when no event is passed", () => {
-    const err = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(hookMain(["node", "hook"])).toBe(2);
-    err.mockRestore();
   });
 
   it("returns 0 for SessionStart and SessionEnd", () => {

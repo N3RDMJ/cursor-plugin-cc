@@ -1,0 +1,184 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  detectCloudRepository,
+  getBranch,
+  getChangedFiles,
+  getDiff,
+  getRecentCommits,
+  getRemoteUrl,
+  getStatus,
+  isDirty,
+  normalizeGitHubRemote,
+} from "../../../plugins/cursor/scripts/lib/git.mjs";
+
+function git(cwd: string, args: string[]): void {
+  execFileSync("git", ["-C", cwd, ...args], { stdio: "ignore" });
+}
+
+function makeRepo(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), "cursor-git-test-"));
+  git(dir, ["init", "-q", "-b", "main"]);
+  git(dir, ["config", "user.email", "test@example.com"]);
+  git(dir, ["config", "user.name", "Test"]);
+  git(dir, ["config", "commit.gpgsign", "false"]);
+  return dir;
+}
+
+describe("normalizeGitHubRemote", () => {
+  it("accepts SSH form", () => {
+    expect(normalizeGitHubRemote("git@github.com:foo/bar.git")).toBe("https://github.com/foo/bar");
+  });
+
+  it("accepts ssh:// form", () => {
+    expect(normalizeGitHubRemote("ssh://git@github.com/foo/bar.git")).toBe(
+      "https://github.com/foo/bar",
+    );
+  });
+
+  it("accepts https form and strips .git", () => {
+    expect(normalizeGitHubRemote("https://github.com/foo/bar.git")).toBe(
+      "https://github.com/foo/bar",
+    );
+  });
+
+  it("returns undefined for non-GitHub remotes", () => {
+    expect(normalizeGitHubRemote("https://gitlab.com/foo/bar")).toBeUndefined();
+    expect(normalizeGitHubRemote("git@bitbucket.org:foo/bar.git")).toBeUndefined();
+  });
+});
+
+describe("git helpers (in a real temp repo)", () => {
+  let repo: string;
+
+  beforeEach(() => {
+    repo = makeRepo();
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("getBranch returns the current branch on a fresh repo with one commit", () => {
+    writeFileSync(path.join(repo, "a.txt"), "hello\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    expect(getBranch(repo)).toBe("main");
+  });
+
+  it("getRemoteUrl returns origin when set, undefined when absent", () => {
+    expect(getRemoteUrl(repo)).toBeUndefined();
+    git(repo, ["remote", "add", "origin", "git@github.com:foo/bar.git"]);
+    expect(getRemoteUrl(repo)).toBe("git@github.com:foo/bar.git");
+  });
+
+  it("getStatus and isDirty reflect uncommitted changes", () => {
+    writeFileSync(path.join(repo, "a.txt"), "x\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    expect(isDirty(repo)).toBe(false);
+    writeFileSync(path.join(repo, "a.txt"), "modified\n");
+    expect(isDirty(repo)).toBe(true);
+    expect(getStatus(repo)).toContain("a.txt");
+  });
+
+  it("getDiff returns the working-tree diff", () => {
+    writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    writeFileSync(path.join(repo, "a.txt"), "two\n");
+    const diff = getDiff(repo);
+    expect(diff).toContain("a.txt");
+    expect(diff).toContain("-one");
+    expect(diff).toContain("+two");
+  });
+
+  it("getDiff with staged=true only includes staged changes", () => {
+    writeFileSync(path.join(repo, "a.txt"), "one\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    writeFileSync(path.join(repo, "a.txt"), "two\n");
+    git(repo, ["add", "a.txt"]);
+    writeFileSync(path.join(repo, "a.txt"), "three\n");
+    const staged = getDiff(repo, { staged: true });
+    expect(staged).toContain("+two");
+    expect(staged).not.toContain("+three");
+  });
+
+  it("getRecentCommits returns hash + subject pairs", () => {
+    writeFileSync(path.join(repo, "a.txt"), "x\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "first commit"]);
+    writeFileSync(path.join(repo, "b.txt"), "y\n");
+    git(repo, ["add", "b.txt"]);
+    git(repo, ["commit", "-q", "-m", "second commit"]);
+
+    const commits = getRecentCommits(repo, 5);
+    expect(commits).toHaveLength(2);
+    expect(commits[0]?.subject).toBe("second commit");
+    expect(commits[1]?.subject).toBe("first commit");
+    expect(commits[0]?.hash).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("getChangedFiles returns porcelain status when no baseRef given", () => {
+    writeFileSync(path.join(repo, "a.txt"), "x\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    writeFileSync(path.join(repo, "a.txt"), "modified\n");
+    writeFileSync(path.join(repo, "b.txt"), "new\n");
+    const files = getChangedFiles(repo);
+    const paths = files.map((f) => f.path);
+    expect(paths).toContain("a.txt");
+    expect(paths).toContain("b.txt");
+    const aFile = files.find((f) => f.path === "a.txt");
+    const bFile = files.find((f) => f.path === "b.txt");
+    expect(aFile?.status).toBe("M");
+    expect(bFile?.status).toBe("??");
+  });
+
+  it("detectCloudRepository succeeds when origin points at GitHub", () => {
+    writeFileSync(path.join(repo, "a.txt"), "x\n");
+    git(repo, ["add", "a.txt"]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    git(repo, ["remote", "add", "origin", "git@github.com:foo/bar.git"]);
+    expect(detectCloudRepository(repo)).toEqual({
+      url: "https://github.com/foo/bar",
+      startingRef: "main",
+    });
+  });
+
+  it("detectCloudRepository throws when there is no origin", () => {
+    expect(() => detectCloudRepository(repo)).toThrow(/remote\.origin\.url/);
+  });
+
+  it("detectCloudRepository throws on non-GitHub origins", () => {
+    git(repo, ["remote", "add", "origin", "https://gitlab.com/foo/bar"]);
+    expect(() => detectCloudRepository(repo)).toThrow(/GitHub/);
+  });
+});
+
+describe("git helpers in a non-git directory", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "cursor-non-git-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("getDiff/getStatus/getBranch/getRemoteUrl all return empty/undefined", () => {
+    expect(getDiff(dir)).toBe("");
+    expect(getStatus(dir)).toBe("");
+    expect(getBranch(dir)).toBeUndefined();
+    expect(getRemoteUrl(dir)).toBeUndefined();
+    expect(isDirty(dir)).toBe(false);
+    expect(getRecentCommits(dir, 5)).toEqual([]);
+    expect(getChangedFiles(dir)).toEqual([]);
+  });
+});

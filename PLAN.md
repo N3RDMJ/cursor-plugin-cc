@@ -3,6 +3,25 @@
 Claude Code plugin that delegates work to Cursor's AI agent via `@cursor/sdk`.
 Mirrors [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) architecture.
 
+### Reference: Cursor cookbook `coding-agent-cli`
+
+We mine [`cursor/cookbook/sdk/coding-agent-cli`](https://github.com/cursor/cookbook/tree/main/sdk/coding-agent-cli)
+for SDK-usage patterns. We do **not** vendor the project — it is Bun-only (OpenTUI via
+`bun:ffi`) and is a standalone interactive CLI, not a plugin backend. Specific files we
+lift patterns from:
+
+| Cookbook file | What we take | Where it lands |
+|--------------|--------------|----------------|
+| `src/agent.ts` `emitSdkMessage` | SDKMessage → flat `AgentEvent` mapper | §2.6 `render.mts` (also exposed by 2.1) |
+| `src/agent.ts` `buildPrompt` | System-instruction wrapper around user prompt | §2.1 `cursor-agent.mts` |
+| `src/agent.ts` `detectCloudRepository` / `normalizeGitHubRemote` | Cloud-mode repo detection | §2.1 (cloud-mode follow-on) |
+| `src/agent.ts` model dedupe / variant disambiguation | Model picker output for `setup` | §3.4 `setup` subcommand |
+| `src/agent.ts` `cancelCurrentRun` (`run.supports("cancel")`) | Capability-checked cancel | §2.1 + §2.4 job-control |
+| `src/agent.ts` `summarizeToolArgs` / `formatDuration` | Tool-call + duration formatting | §2.6 `render.mts` |
+| `src/index.ts` `runPlainPrompt` / `renderPlainEvent` | Non-interactive streaming-to-stdout | §3.2 `task` subcommand |
+
+Anything TUI/Bun/OpenTUI-related is intentionally ignored.
+
 ---
 
 ## Phase 1: Project Scaffolding
@@ -147,6 +166,25 @@ Key behaviors:
 - [x] Timeout handling: cancel run if it exceeds configurable timeout (`SendTaskOptions.timeoutMs`)
 - [x] Account helpers: `whoami` / `listModels` for `/cursor:setup`
 
+Follow-on items (from cookbook absorption):
+- [x] `buildPrompt(prompt, instructions?)` — wrap user prompt with default system
+      instructions (mirrors cookbook `AGENT_INSTRUCTIONS`). Instructions
+      overridable per-call.
+- [x] Cloud execution mode: optional `mode: "local" | "cloud"` + `cloudRepo`
+      on `CursorAgentOptions`; when `cloud`, pass `cloud: { repos: [...] }`
+      to `Agent.create`. `detectCloudRepository` lives in `lib/git.mts` (§2.5).
+- [x] `local.force` passthrough — `SendTaskOptions.force` maps to
+      `agent.send(prompt, { local: { force: true } })`.
+- [x] Capability-checked cancel: timeout path checks `run.supports("cancel")`
+      before calling cancel; `cancelRun(run)` helper exposes the
+      `{ cancelled, reason? }` result.
+- ~~Token usage on `CursorRunResult`~~ — `RunResult` does not expose `usage`
+      in the public type; the cookbook reads it via an unsafe cast. Skipped
+      to honor our "no `as any` / `@ts-ignore`" rule.
+- [x] Public `AgentEvent` discriminated union + `toAgentEvents(SDKMessage)`
+      mapper. One message can yield multiple events (assistant text +
+      tool_use blocks).
+
 ### 2.2 `lib/workspace.mts` — Workspace Resolution
 
 Slim, single-purpose module. Mirrors codex-plugin-cc's `workspace.mjs`.
@@ -169,30 +207,47 @@ Job and session state persisted to disk.
 
 ### 2.4 `lib/job-control.mts` — Job CRUD
 
-- [ ] `createJob(type, prompt)` → jobId
-- [ ] `updateJobStatus(jobId, status, result?)` — pending → running → completed/failed/cancelled
-- [ ] `getJob(jobId)` → full job state
-- [ ] `listJobs(filter?)` → summary table
-- [ ] `cancelJob(jobId)` — calls `run.cancel()` on the Cursor SDK
-- [ ] Background job tracking: maintain in-memory map of active runs for cancellation
-- [ ] Job types: `task`, `review`, `adversarial-review`
+- [x] `createJob(input)` → JobRecord (returns full record, not just id)
+- [x] State transitions: `markRunning` / `markFinished` / `markFailed` /
+      `markCancelled`. `markFinished` maps CursorAgentStatus → JobStatus
+      (`finished`→`completed`, `error`→`failed`, `expired`→`cancelled`+meta).
+- [x] `getJob(jobId)` → full job state
+- [x] `listJobs(filter?)` with type/status/limit filters
+- [x] `cancelJob(jobId)` — capability-checked via `cancelRun` from §2.1
+      (returns `{ cancelled, reason?, job? }` so callers can render a clean
+      diagnostic). Marks pending+no-active-run as cancelled with
+      reason="run-not-active".
+- [x] Background job tracking: in-process `activeRuns` map keyed by jobId
+      (`registerActiveRun` / `unregisterActiveRun` / `getActiveRun`).
+- [x] Job types: `task`, `review`, `adversarial-review` (id prefix `adv-`).
+- [x] `logJobLine` helper appends to per-job log file.
 
 ### 2.5 `lib/git.mts` — Git Helpers
 
-- [ ] `getDiff(options?)` — staged/unstaged diff for review
-- [ ] `getStatus()` — working tree status summary
-- [ ] `getRecentCommits(n)` — last N commit messages + hashes
-- [ ] `getBranch()` — current branch name
-- [ ] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
-- [ ] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
-- [ ] `getChangedFiles()` — list of modified/added/deleted files
+- [x] `getDiff(options?)` — staged/unstaged diff for review
+- [x] `getStatus()` — working tree status summary
+- [x] `getRecentCommits(n)` — last N commit messages + hashes
+- [x] `getBranch()` — current branch name
+- [x] `getRemoteUrl()` — origin URL (for prompt context; absent when no remote)
+- [x] `isDirty()` — boolean working-tree-dirty check (relocated from 2.2)
+- [x] `getChangedFiles()` — list of modified/added/deleted files
+- [x] `detectCloudRepository(cwd)` + `normalizeGitHubRemote(remote)` — port
+      from cookbook `src/agent.ts` (SSH / `ssh://` / `https://` forms, strip
+      `.git`). Used by §2.1 cloud-mode follow-on.
 
 ### 2.6 `lib/render.mts` — Terminal Output
 
-- [ ] `renderJobTable(jobs)` — formatted table of jobs with status, type, elapsed time
-- [ ] `renderStreamEvent(event)` — format a single stream event for terminal display
-- [ ] `renderReviewResult(review)` — format structured review output with severity colors
-- [ ] `renderError(error)` — consistent error formatting
+- [x] `renderJobTable(jobs)` — aligned text table with derived ages
+- [x] `renderStreamEvent(event)` — format a single `AgentEvent` (the flat
+      shape from §2.1) for terminal display. Mirrors cookbook
+      `renderPlainEvent`: assistant text → stdout; thinking/tool/status/task
+      → annotated stderr lines. Returns `{stdout?, stderr?}` so the caller
+      controls actual writes (testable).
+- [x] `renderReviewResult(review)` — verdict, sorted findings, next steps
+- [x] `renderError(error)` — consistent error formatting
+- [x] `formatDuration(ms)` — lifted from cookbook
+- [x] `summarizeToolArgs(toolName, args)` — keyed-lookup table for
+      read/glob/grep/shell/edit, ported from cookbook `getToolSummaryKeys`.
 
 **Exit criteria**: Unit tests for each module. `cursor-agent.mts` tested with mocked SDK (integration tests in Phase 5).
 
@@ -218,10 +273,12 @@ node cursor-companion.mjs <command> [args...] [flags]
 | `cancel <job-id>` | Cancel an active job |
 | `setup` | Check dependencies, validate API key |
 
-- [ ] Argument parsing (`lib/args.mts` — minimal, no heavy deps)
-- [ ] Subcommand routing
-- [ ] Global flags: `--model`, `--timeout`, `--json` (machine-readable output)
-- [ ] Exit codes: 0 success, 1 error, 2 invalid args
+- [x] Argument parsing (`lib/args.mts` — minimal, no heavy deps)
+- [x] Subcommand routing (handlers live in `commands/<name>.mts`)
+- [x] Subcommand-local flags: `--model`, `--timeout`, `--json`, `--help`
+- [x] Exit codes: 0 success, 1 error, 2 invalid args
+- [x] CLI takes a `CommandIO` (stdout/stderr/cwd/env) so tests can inject
+      sinks instead of writing to the real process streams.
 
 ### 3.2 `task` Subcommand
 
@@ -229,14 +286,17 @@ node cursor-companion.mjs <command> [args...] [flags]
 node cursor-companion.mjs task "Refactor the auth module" --write --model composer-2
 ```
 
-- [ ] Create job via job-control
-- [ ] Create Cursor agent via cursor-agent
-- [ ] Send prompt with workspace context (branch, recent commits, changed files)
-- [ ] Stream events to stdout in real-time
-- [ ] On completion: persist result, update job status
-- [ ] `--write` flag: allow file modifications (default: read-only analysis)
-- [ ] `--resume-last` flag: resume most recent agent session
-- [ ] `--background` flag: run in background, return job ID immediately
+- [x] Create job via job-control
+- [x] Create Cursor agent via cursor-agent
+- [x] Send prompt with workspace context (branch, recent commits, changed files)
+- [x] Stream events to stdout in real-time (`renderStreamEvent` over the
+      `AgentEvent` mapper from §2.1 — same shape as cookbook `runPlainPrompt`)
+- [x] On completion: persist result, update job status
+- [x] `--write` flag: allow file modifications (default: read-only analysis)
+- [x] `--resume-last` flag: resume most recent agent session
+- [x] `--background` flag: run in background, return job ID immediately
+- [x] `--force` flag: pass `local.force` through (recover stuck local run)
+- [x] `--cloud` flag: run on Cursor cloud against detected repo origin
 
 ### 3.3 `review` Subcommand
 
@@ -244,12 +304,13 @@ node cursor-companion.mjs task "Refactor the auth module" --write --model compos
 node cursor-companion.mjs review [--staged] [--adversarial]
 ```
 
-- [ ] Collect git diff (staged or all changes)
-- [ ] Build review prompt with diff, file list, and project context
-- [ ] Request structured output matching review schema
-- [ ] Parse and validate Cursor's response against schema
-- [ ] Output structured review (verdict, findings, next steps)
-- [ ] `--adversarial` flag: switches prompt to challenge design decisions
+- [x] Collect git diff (staged or all changes)
+- [x] Build review prompt with diff, file list, and project context
+- [x] Request structured output matching review schema
+- [x] Parse and validate Cursor's response against schema (tolerant fence
+      stripping; verdict/summary/findings/next_steps shape checks)
+- [x] Output structured review (verdict, findings, next steps)
+- [x] `adversarial-review` subcommand uses challenge-the-design instructions
 
 Review output schema (matches codex plugin):
 ```typescript
@@ -276,17 +337,23 @@ interface ReviewOutput {
 node cursor-companion.mjs setup
 ```
 
-- [ ] Check Node.js version (>= 18)
-- [ ] Check `@cursor/sdk` installed
-- [ ] Validate `CURSOR_API_KEY` — call `Cursor.me()` to verify auth
-- [ ] List available models via `Cursor.models.list()`
-- [ ] Report readiness status
+- [x] Check Node.js version (>= 18)
+- ~~Check `@cursor/sdk` installed~~ (implicit at import-time; if it's missing
+      the CLI fails to load before this check runs)
+- [x] Validate `CURSOR_API_KEY` — call `Cursor.me()` to verify auth
+- [x] List available models via `Cursor.models.list()` — apply cookbook
+      `modelToChoices`-style flattening so multi-variant models render as one
+      row per concrete `ModelSelection`
+- [x] Report readiness status (text + `--json` machine-readable)
 
 ### 3.5 `status`, `result`, `cancel` Subcommands
 
-- [ ] `status` — read job index, render table. With `--job-id`, show single job detail
-- [ ] `result <job-id>` — read persisted result, output verbatim
-- [ ] `cancel <job-id>` — find active run, call cancel, update job status
+- [x] `status` — read job index, render table. Positional `<job-id>` shows
+      detail. Filters: `--type`, `--status`, `--limit`, `--json`.
+- [x] `result <job-id>` — read persisted result; `--log` reads streaming log;
+      `--json` emits the full JobRecord
+- [x] `cancel <job-id>` — capability-checked cancel via `cancelJob`
+      (returns 1 + reason when not cancellable)
 
 **Exit criteria**: Each subcommand works end-to-end from CLI. Manual test: `node cursor-companion.mjs setup` succeeds with valid API key.
 
@@ -310,18 +377,18 @@ Each file in `commands/` is a prompt document Claude reads when the user invokes
 | `result.md` | `/cursor:result <job-id>` | Retrieve job output |
 | `cancel.md` | `/cursor:cancel <job-id>` | Cancel active job |
 
-For commands that just shell out: `disable-model-invocation: true` + `allowed-tools: Bash(node:*)`.
+For commands that just shell out: `disable-model-invocation: true` + `allowed-tools: Bash(node:*)`. ✅ All seven slash command markdown files implemented.
 
 ### 4.2 Subagent: `cursor-rescue`
 
 `agents/cursor-rescue.md` — named subagent invoked via `Agent` tool with `subagent_type: "cursor:cursor-rescue"`.
 
 Behavior:
-- Receives a prompt (the hard problem)
-- Builds one shell command: `node cursor-companion.mjs task "<prompt>" --write`
-- Executes via Bash, returns stdout unchanged
-- Never orchestrates, never inspects files itself
-- Supports `$ARGUMENTS` for user input
+- [x] Receives a prompt (the hard problem)
+- [x] Builds one shell command: `node cursor-companion.mjs task "<prompt>" --write`
+- [x] Executes via Bash, returns stdout unchanged
+- [x] Never orchestrates, never inspects files itself
+- [x] Supports `$ARGUMENTS` for user input
 
 ### 4.3 Hooks
 
@@ -333,16 +400,20 @@ Behavior:
 | Session end | `SessionEnd` | `session-lifecycle-hook.mjs SessionEnd` | 5s |
 
 `session-lifecycle-hook.mts`:
-- **SessionStart**: Read session ID from stdin JSON. Write session metadata to state dir. Export env vars (`CURSOR_SESSION_ID`, `CURSOR_PLUGIN_ROOT`).
-- **SessionEnd**: Read active agent IDs from session state. Dispose each via `agent[Symbol.asyncDispose]()`. Clean up temp files. Update session state.
+- [x] **SessionStart**: read session id from stdin JSON, write session
+      metadata into state dir
+- [x] **SessionEnd**: clear the session marker. Agents are not disposed
+      because background runs may still be using them — disposal is the
+      caller's responsibility, and the SDK manages durable agent lifecycle.
+      A future enhancement could iterate `agentIds` and dispose any that
+      are still attached.
 
-### 4.4 Skills (Already Created in /init)
+### 4.4 Skills
 
-- `cursor-rescue` — delegation instructions
-- `cursor-result-handling` — output presentation rules
-
-Additional skill to create:
-- [ ] `cursor-prompting/SKILL.md` — how to compose effective prompts for Cursor agent (task structure, context inclusion, structured output contracts)
+- [x] `cursor-rescue/SKILL.md` — when to delegate, what to include
+- [x] `cursor-result-handling/SKILL.md` — output presentation rules
+- [x] `cursor-prompting/SKILL.md` — task structure, `--write` policy,
+      structured-output contracts
 
 **Exit criteria**: Install plugin locally (`/plugin install /path/to/cursor-plugin-cc`), all slash commands appear, `/cursor:setup` works.
 
@@ -352,14 +423,18 @@ Additional skill to create:
 
 ### 5.1 Unit Tests (`tests/unit/`)
 
-| Module | Test Coverage |
-|--------|--------------|
-| `lib/workspace.mts` | Git root resolution, workspace ID generation, edge cases (no git, nested repos) |
-| `lib/state.mts` | Read/write/prune jobs, atomic writes, corruption recovery |
-| `lib/job-control.mts` | Job lifecycle (create → running → completed/failed/cancelled), listing, filtering |
-| `lib/git.mts` | Diff parsing, status parsing, empty repo handling |
-| `lib/render.mts` | Table formatting, event rendering, review formatting |
-| `lib/args.mts` | Argument parsing, flag extraction, validation |
+| Module | Test Coverage | Status |
+|--------|---------------|--------|
+| `lib/workspace.mts` | Git root resolution, workspace ID generation, edge cases (no git, nested repos) | ✅ |
+| `lib/state.mts` | Read/write/prune jobs, atomic writes, corruption recovery | ✅ |
+| `lib/job-control.mts` | Job lifecycle (create → running → completed/failed/cancelled), listing, filtering | ✅ |
+| `lib/git.mts` | Diff parsing, status parsing, empty repo handling, GitHub remote normalization | ✅ |
+| `lib/render.mts` | Table formatting, event rendering, review formatting, tool-arg summarizer | ✅ |
+| `lib/args.mts` | Argument parsing, flag extraction, validation | ✅ |
+| `lib/cursor-agent.mts` | Mocked SDK: createAgent / sendTask / oneShot / cancel / cloud-mode / force / AgentEvent mapper | ✅ |
+| `commands/review.mts` | JSON extraction (fence-stripping), shape validation | ✅ |
+| `cursor-companion.mts` | Router smoke (help, unknown, status empty, --help, missing-id, setup-no-key) | ✅ |
+| `session-lifecycle-hook.mts` | SessionStart writes session.json, SessionEnd clears it | ✅ |
 
 ### 5.2 Integration Tests (`tests/integration/`)
 
