@@ -47,6 +47,18 @@ describe("createJob / getJob / listJobs", () => {
     expect(job.id.startsWith("adv-")).toBe(true);
   });
 
+  it("does not mutate the caller's metadata object when summary is also passed", () => {
+    const callerMetadata = { tag: "regression" };
+    const job = createJob(stateDir, {
+      type: "task",
+      prompt: "x",
+      summary: "explicit summary",
+      metadata: callerMetadata,
+    });
+    expect(callerMetadata).toEqual({ tag: "regression" });
+    expect(job.metadata).toEqual({ tag: "regression", summary: "explicit summary" });
+  });
+
   it("filters by type and status, and respects limit", () => {
     createJob(stateDir, { type: "task", prompt: "a" });
     const r = createJob(stateDir, { type: "review", prompt: "b" });

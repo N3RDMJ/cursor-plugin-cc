@@ -71,10 +71,17 @@ function upsertIndex(stateDir: string, record: JobRecord): void {
 /**
  * Create a new job in `pending` state. Returns the full record so callers
  * can pass it straight into `markRunning` once the agent run starts.
+ *
+ * `input.metadata` is shallow-copied — we never hold a reference to the
+ * caller's object so subsequent updates can't leak back into their state.
  */
 export function createJob(stateDir: string, input: CreateJobInput): JobRecord {
   const id = newJobId(input.type);
   const created = nowIso();
+  const metadata: Record<string, unknown> | undefined =
+    input.metadata || input.summary
+      ? { ...(input.metadata ?? {}), ...(input.summary ? { summary: input.summary } : {}) }
+      : undefined;
   const record: JobRecord = {
     id,
     type: input.type,
@@ -82,10 +89,8 @@ export function createJob(stateDir: string, input: CreateJobInput): JobRecord {
     prompt: input.prompt,
     createdAt: created,
     updatedAt: created,
-    ...(input.metadata ? { metadata: input.metadata } : {}),
+    ...(metadata ? { metadata } : {}),
   };
-  if (input.summary && record.metadata) record.metadata.summary = input.summary;
-  else if (input.summary) record.metadata = { summary: input.summary };
   writeJob(stateDir, record);
   upsertIndex(stateDir, record);
   return record;

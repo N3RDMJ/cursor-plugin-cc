@@ -9,9 +9,10 @@ disable-model-invocation: true
 Run the plugin's self-check.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs setup
+node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs setup $ARGUMENTS
 ```
 
-If anything fails (API key missing, network error, model catalog empty), the
-exit code is non-zero and the failure rows print on stdout. No further action
-needed — surface the output verbatim to the user.
+Pass `--json` for machine-readable output. If anything fails (API key missing,
+network error, model catalog empty), the exit code is non-zero and the failure
+rows print on stdout. No further action needed — surface the output verbatim
+to the user.
