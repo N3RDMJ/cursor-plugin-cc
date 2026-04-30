@@ -24,6 +24,6 @@
     "vitest": "^4.1.5"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.9"
+    "@cursor/sdk": "^1.0.11"
   }
 }
