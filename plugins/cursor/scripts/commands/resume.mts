@@ -1,28 +1,21 @@
-import type { ModelSelection, SDKMessage } from "@cursor/sdk";
+import type { ModelSelection } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildPrompt,
   type CursorAgentOptions,
-  disposeAgent,
   resumeAgent,
-  sendTask,
-  toAgentEvents,
+  writePolicyText,
 } from "../lib/cursor-agent.mjs";
 import { detectCloudRepository } from "../lib/git.mjs";
 import {
   createJob,
   findRecentTaskAgents,
-  logJobLine,
   markFailed,
-  markFinished,
-  markRunning,
   type RecentTaskAgent,
-  registerActiveRun,
-  unregisterActiveRun,
 } from "../lib/job-control.mjs";
-import { renderStreamEvent } from "../lib/render.mjs";
+import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
@@ -223,10 +216,7 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
     agentId = flags.target.agentId;
   }
 
-  const writePolicy = flags.write
-    ? "You may modify files in the workspace."
-    : "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
-  const fullPrompt = buildPrompt(`${writePolicy}\n\n${flags.prompt}`);
+  const fullPrompt = buildPrompt(`${writePolicyText(flags.write)}\n\n${flags.prompt}`);
 
   const job = createJob(stateDir, {
     type: "task",
@@ -243,85 +233,24 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
     throw err;
   }
 
+  const runFlags = {
+    ...(flags.timeoutMs !== undefined ? { timeoutMs: flags.timeoutMs } : {}),
+    ...(flags.force ? { force: true } : {}),
+    json: flags.json,
+  };
+
   if (flags.background) {
-    detachBackgroundRun(agent, fullPrompt, flags, stateDir, job.id);
+    runAgentTaskBackground({ agent, prompt: fullPrompt, flags: runFlags, stateDir, jobId: job.id });
     io.stdout.write(`${job.id}\n`);
     return 0;
   }
 
-  try {
-    const result = await sendTask(agent, fullPrompt, {
-      ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
-      ...(flags.force ? { force: true } : {}),
-      onRunStart: (run) => {
-        markRunning(stateDir, job.id, { agentId: run.agentId, runId: run.id });
-        registerActiveRun(job.id, run);
-      },
-      onEvent: (event: SDKMessage) => {
-        for (const ae of toAgentEvents(event)) {
-          const rendered = renderStreamEvent(ae, { quietStatus: true });
-          if (rendered.stdout) io.stdout.write(rendered.stdout);
-          if (rendered.stderr) {
-            io.stderr.write(rendered.stderr);
-            logJobLine(stateDir, job.id, rendered.stderr.replace(/\n$/, ""));
-          }
-        }
-      },
-    });
-
-    markFinished(stateDir, job.id, result);
-
-    if (flags.json) {
-      io.stdout.write(`${JSON.stringify({ jobId: job.id, ...result })}\n`);
-    } else if (!result.output.endsWith("\n")) {
-      io.stdout.write("\n");
-    }
-
-    return result.status === "finished" ? 0 : 1;
-  } catch (err) {
-    markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
-    throw err;
-  } finally {
-    unregisterActiveRun(job.id);
-    await disposeAgent(agent).catch(() => undefined);
-  }
-}
-
-/**
- * Background mode: same shape as task.detachBackgroundRun. Routes both stdout
- * and stderr renderings into the per-job log so the caller (which has already
- * exited) can replay them via `/cursor:result --log`.
- */
-function detachBackgroundRun(
-  agent: Awaited<ReturnType<typeof resumeAgent>>,
-  prompt: string,
-  flags: RunFlags,
-  stateDir: string,
-  jobId: string,
-): void {
-  void (async () => {
-    try {
-      const result = await sendTask(agent, prompt, {
-        ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
-        ...(flags.force ? { force: true } : {}),
-        onRunStart: (run) => {
-          markRunning(stateDir, jobId, { agentId: run.agentId, runId: run.id });
-          registerActiveRun(jobId, run);
-        },
-        onEvent: (event: SDKMessage) => {
-          for (const ae of toAgentEvents(event)) {
-            const rendered = renderStreamEvent(ae);
-            if (rendered.stdout) logJobLine(stateDir, jobId, rendered.stdout.replace(/\n$/, ""));
-            if (rendered.stderr) logJobLine(stateDir, jobId, rendered.stderr.replace(/\n$/, ""));
-          }
-        },
-      });
-      markFinished(stateDir, jobId, result);
-    } catch (err) {
-      markFailed(stateDir, jobId, err instanceof Error ? err.message : String(err));
-    } finally {
-      unregisterActiveRun(jobId);
-      await disposeAgent(agent).catch(() => undefined);
-    }
-  })();
+  return runAgentTaskForeground({
+    agent,
+    prompt: fullPrompt,
+    flags: runFlags,
+    io,
+    stateDir,
+    jobId: job.id,
+  });
 }

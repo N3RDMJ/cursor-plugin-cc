@@ -124,6 +124,18 @@ export const DEFAULT_AGENT_INSTRUCTIONS = [
   "Keep progress updates concise and summarize the result clearly at the end.",
 ].join("\n");
 
+/** Inline policy string for prompts that allow file writes (`task --write`, `resume --write`). */
+export const WRITE_POLICY = "You may modify files in the workspace.";
+
+/** Inline policy string for default read-only invocations. */
+export const READ_ONLY_POLICY =
+  "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
+
+/** Pick the policy string to embed in a prompt based on the user's `--write` flag. */
+export function writePolicyText(write: boolean): string {
+  return write ? WRITE_POLICY : READ_ONLY_POLICY;
+}
+
 /**
  * Wrap a user prompt with system instructions. Callers that need raw prompts
  * (e.g. structured-output review) can skip this and pass the prompt directly

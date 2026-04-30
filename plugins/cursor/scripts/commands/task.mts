@@ -1,4 +1,4 @@
-import type { ModelSelection, SDKMessage } from "@cursor/sdk";
+import type { ModelSelection } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
@@ -6,23 +6,12 @@ import {
   buildPrompt,
   type CursorAgentOptions,
   createAgent,
-  disposeAgent,
   resumeAgent,
-  sendTask,
-  toAgentEvents,
+  writePolicyText,
 } from "../lib/cursor-agent.mjs";
 import { detectCloudRepository, getBranch, getRecentCommits } from "../lib/git.mjs";
-import {
-  createJob,
-  findRecentTaskAgents,
-  logJobLine,
-  markFailed,
-  markFinished,
-  markRunning,
-  registerActiveRun,
-  unregisterActiveRun,
-} from "../lib/job-control.mjs";
-import { renderStreamEvent } from "../lib/render.mjs";
+import { createJob, findRecentTaskAgents } from "../lib/job-control.mjs";
+import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
@@ -142,13 +131,12 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
 
-  const writePolicy = flags.write
-    ? "You may modify files in the workspace."
-    : "Do NOT modify files. Read and analyze only — produce diffs/suggestions in your response, but do not write to disk.";
   // Skip local-workspace context in cloud mode: the cloud agent runs against
   // `startingRef` of the remote, so local uncommitted state would mislead it.
   const contextHeader = flags.cloud ? "" : buildContextHeader(workspaceRoot);
-  const sections = [contextHeader, writePolicy, flags.prompt].filter((s) => s.length > 0);
+  const sections = [contextHeader, writePolicyText(flags.write), flags.prompt].filter(
+    (s) => s.length > 0,
+  );
   const fullPrompt = buildPrompt(sections.join("\n\n"));
 
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
@@ -174,89 +162,24 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
     agent = await createAgent(agentOpts);
   }
 
+  const runFlags = {
+    ...(flags.timeoutMs !== undefined ? { timeoutMs: flags.timeoutMs } : {}),
+    ...(flags.force ? { force: true } : {}),
+    json: flags.json,
+  };
+
   if (flags.background) {
-    detachBackgroundRun(agent, fullPrompt, flags, stateDir, job.id);
+    runAgentTaskBackground({ agent, prompt: fullPrompt, flags: runFlags, stateDir, jobId: job.id });
     io.stdout.write(`${job.id}\n`);
     return 0;
   }
 
-  try {
-    const result = await sendTask(agent, fullPrompt, {
-      ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
-      ...(flags.force ? { force: true } : {}),
-      onRunStart: (run) => {
-        markRunning(stateDir, job.id, { agentId: run.agentId, runId: run.id });
-        registerActiveRun(job.id, run);
-      },
-      onEvent: (event: SDKMessage) => {
-        for (const ae of toAgentEvents(event)) {
-          const rendered = renderStreamEvent(ae, { quietStatus: true });
-          if (rendered.stdout) io.stdout.write(rendered.stdout);
-          if (rendered.stderr) {
-            io.stderr.write(rendered.stderr);
-            logJobLine(stateDir, job.id, rendered.stderr.replace(/\n$/, ""));
-          }
-        }
-      },
-    });
-
-    markFinished(stateDir, job.id, result);
-
-    if (flags.json) {
-      io.stdout.write(`${JSON.stringify({ jobId: job.id, ...result })}\n`);
-    } else if (!result.output.endsWith("\n")) {
-      io.stdout.write("\n");
-    }
-
-    return result.status === "finished" ? 0 : 1;
-  } catch (err) {
-    markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
-    throw err;
-  } finally {
-    unregisterActiveRun(job.id);
-    await disposeAgent(agent).catch(() => undefined);
-  }
-}
-
-/**
- * Background mode: kick off the run, persist its events to the per-job log,
- * and return immediately. The CLI process keeps running until the IIFE
- * resolves (Node won't exit while a Promise is pending), so the run
- * actually completes — but stdout was already returned to the user. Cancel
- * of a background run from a different CLI invocation falls back to
- * `run-not-active` + persisted-mark since the Run object is in this process
- * only.
- */
-function detachBackgroundRun(
-  agent: Awaited<ReturnType<typeof createAgent>>,
-  prompt: string,
-  flags: TaskFlags,
-  stateDir: string,
-  jobId: string,
-): void {
-  void (async () => {
-    try {
-      const result = await sendTask(agent, prompt, {
-        ...(flags.timeoutMs ? { timeoutMs: flags.timeoutMs } : {}),
-        ...(flags.force ? { force: true } : {}),
-        onRunStart: (run) => {
-          markRunning(stateDir, jobId, { agentId: run.agentId, runId: run.id });
-          registerActiveRun(jobId, run);
-        },
-        onEvent: (event: SDKMessage) => {
-          for (const ae of toAgentEvents(event)) {
-            const rendered = renderStreamEvent(ae);
-            if (rendered.stdout) logJobLine(stateDir, jobId, rendered.stdout.replace(/\n$/, ""));
-            if (rendered.stderr) logJobLine(stateDir, jobId, rendered.stderr.replace(/\n$/, ""));
-          }
-        },
-      });
-      markFinished(stateDir, jobId, result);
-    } catch (err) {
-      markFailed(stateDir, jobId, err instanceof Error ? err.message : String(err));
-    } finally {
-      unregisterActiveRun(jobId);
-      await disposeAgent(agent).catch(() => undefined);
-    }
-  })();
+  return runAgentTaskForeground({
+    agent,
+    prompt: fullPrompt,
+    flags: runFlags,
+    io,
+    stateDir,
+    jobId: job.id,
+  });
 }
