@@ -329,12 +329,17 @@ export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]>
   return withRetry(() => Cursor.models.list({ apiKey }), opts.retry);
 }
 
-/** Confirm a ModelSelection.id is in the catalog. Throws on miss. */
+/**
+ * Confirm a ModelSelection.id is in the catalog. Throws on miss. Pass
+ * `catalog` when you've already fetched the list (e.g. to share one fetch
+ * between validation and a subsequent report) — otherwise the catalog is
+ * fetched fresh.
+ */
 export async function validateModel(
   model: ModelSelection,
-  opts: RequestOptions = {},
+  opts: RequestOptions & { catalog?: SDKModel[] } = {},
 ): Promise<SDKModel> {
-  const models = await listModels(opts);
+  const models = opts.catalog ?? (await listModels(opts));
   const match = models.find((m) => m.id === model.id);
   if (!match) {
     const known = models.map((m) => m.id).join(", ") || "(none)";

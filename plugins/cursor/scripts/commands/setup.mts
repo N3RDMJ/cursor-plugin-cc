@@ -1,4 +1,4 @@
-import type { ModelSelection } from "@cursor/sdk";
+import type { ModelSelection, SDKModel } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
@@ -111,6 +111,12 @@ interface SetupReport {
 interface BuildReportInput {
   workspaceRoot: string;
   gateEnabled: boolean;
+  /** Catalog already fetched by the caller — skips the duplicate list call. */
+  prefetchedCatalog?: SDKModel[];
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 async function buildReport(input: BuildReportInput): Promise<SetupReport> {
@@ -128,24 +134,27 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
     resolveApiKey();
     report.apiKey.ok = true;
   } catch (err) {
-    report.apiKey.error = err instanceof Error ? err.message : String(err);
+    report.apiKey.error = errorMessage(err);
     return report;
   }
 
-  try {
-    const me = await whoami();
+  const modelsPromise = input.prefetchedCatalog
+    ? Promise.resolve(input.prefetchedCatalog)
+    : listModels();
+  const [accountResult, modelsResult] = await Promise.allSettled([whoami(), modelsPromise]);
+
+  if (accountResult.status === "fulfilled") {
     report.account.ok = true;
-    report.account.apiKeyName = me.apiKeyName;
-  } catch (err) {
-    report.account.error = err instanceof Error ? err.message : String(err);
+    report.account.apiKeyName = accountResult.value.apiKeyName;
+  } else {
+    report.account.error = errorMessage(accountResult.reason);
   }
 
-  try {
-    const models = await listModels();
-    report.models.choices = modelChoices(models);
+  if (modelsResult.status === "fulfilled") {
+    report.models.choices = modelChoices(modelsResult.value);
     report.models.ok = report.models.choices.length > 0;
-  } catch (err) {
-    report.models.error = err instanceof Error ? err.message : String(err);
+  } else {
+    report.models.error = errorMessage(modelsResult.reason);
   }
 
   return report;
@@ -183,8 +192,6 @@ function renderReport(report: SetupReport): string {
 
 function describeSource(source: DefaultModelSource): string {
   switch (source) {
-    case "flag":
-      return "from --model";
     case "env":
       return "from CURSOR_MODEL env";
     case "config":
@@ -226,10 +233,12 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     throw new UsageError("--set-model requires a non-empty model id");
   }
 
+  // Pre-fetch the catalog when validating --set-model so buildReport can
+  // reuse it instead of listing models a second time.
+  let prefetchedCatalog: SDKModel[] | undefined;
   if (setModelId) {
-    // Validate against the live catalog so we fail fast on typos rather than
-    // letting the next /cursor:task surface "Model 'foo' is not available".
-    await validateModel({ id: setModelId });
+    prefetchedCatalog = await listModels();
+    await validateModel({ id: setModelId }, { catalog: prefetchedCatalog });
     setDefaultModel({ id: setModelId });
   } else if (clearModel) {
     clearDefaultModel();
@@ -242,7 +251,11 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     ? setGateEnabled(stateDir, enableGate).enabled
     : readGateConfig(stateDir).enabled;
 
-  const report = await buildReport({ workspaceRoot, gateEnabled });
+  const report = await buildReport({
+    workspaceRoot,
+    gateEnabled,
+    ...(prefetchedCatalog ? { prefetchedCatalog } : {}),
+  });
 
   if (bool(parsed, "json")) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

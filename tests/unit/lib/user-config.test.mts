@@ -74,14 +74,7 @@ describe("user-config persistence", () => {
 describe("resolveDefaultModel resolution order", () => {
   const fallback = { id: "composer-2" };
 
-  it("prefers the explicit override over everything", () => {
-    setDefaultModel({ id: "from-config" });
-    process.env[USER_CONFIG_ENV_MODEL] = "from-env";
-    const resolved = resolveDefaultModel(fallback, { override: { id: "from-flag" } });
-    expect(resolved).toEqual({ model: { id: "from-flag" }, source: "flag" });
-  });
-
-  it("uses CURSOR_MODEL when no override is supplied", () => {
+  it("uses CURSOR_MODEL when set", () => {
     setDefaultModel({ id: "from-config" });
     process.env[USER_CONFIG_ENV_MODEL] = "from-env";
     const resolved = resolveDefaultModel(fallback);
