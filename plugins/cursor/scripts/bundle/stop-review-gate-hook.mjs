@@ -8,7 +8,7 @@ import {
   parseReview,
   readGateConfig,
   renderReviewResult
-} from "./chunk-ERUNHUF2.mjs";
+} from "./chunk-AY5SVYCZ.mjs";
 import {
   parseHookPayload,
   readHookStdinSync

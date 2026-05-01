@@ -231,92 +231,25 @@ import {
 } from "@cursor/sdk";
 
 // plugins/cursor/scripts/lib/credentials.mts
-import { execFile as execFileCb, spawn } from "node:child_process";
-import { promisify } from "node:util";
-var execFile = promisify(execFileCb);
-function spawnWithStdin(command, args, input, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { timeout: timeoutMs, stdio: ["pipe", "ignore", "pipe"] });
-    let stderr = "";
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
-    });
-    child.stdin.end(input);
-  });
-}
+import { Entry } from "@napi-rs/keyring";
 var SERVICE = "cursor-plugin-cc";
 var ACCOUNT = "default";
-var EXEC_TIMEOUT_MS = 5e3;
-var LinuxSecretTool = class {
-  name = "secret-tool (Secret Service)";
+var NativeKeyring = class {
+  name = "OS keychain";
   async get() {
     try {
-      const { stdout } = await execFile(
-        "secret-tool",
-        ["lookup", "service", SERVICE, "account", ACCOUNT],
-        { timeout: EXEC_TIMEOUT_MS }
-      );
-      const val = stdout.trimEnd();
-      return val.length > 0 ? val : void 0;
+      const val = new Entry(SERVICE, ACCOUNT).getPassword();
+      return val && val.length > 0 ? val : void 0;
     } catch {
       return void 0;
     }
   }
   async set(secret) {
-    await spawnWithStdin(
-      "secret-tool",
-      ["store", "--label", `${SERVICE} API key`, "service", SERVICE, "account", ACCOUNT],
-      secret,
-      EXEC_TIMEOUT_MS
-    );
+    new Entry(SERVICE, ACCOUNT).setPassword(secret);
   }
   async delete() {
     try {
-      await execFile("secret-tool", ["clear", "service", SERVICE, "account", ACCOUNT], {
-        timeout: EXEC_TIMEOUT_MS
-      });
-    } catch {
-    }
-  }
-};
-var MacOSSecurity = class {
-  name = "macOS Keychain";
-  async get() {
-    try {
-      const { stdout } = await execFile(
-        "security",
-        ["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"],
-        { timeout: EXEC_TIMEOUT_MS }
-      );
-      const val = stdout.trimEnd();
-      return val.length > 0 ? val : void 0;
-    } catch {
-      return void 0;
-    }
-  }
-  async set(secret) {
-    try {
-      await this.delete();
-    } catch {
-    }
-    await spawnWithStdin(
-      "security",
-      ["add-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-U"],
-      `${secret}
-`,
-      EXEC_TIMEOUT_MS
-    );
-  }
-  async delete() {
-    try {
-      await execFile("security", ["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT], {
-        timeout: EXEC_TIMEOUT_MS
-      });
+      new Entry(SERVICE, ACCOUNT).deletePassword();
     } catch {
     }
   }
@@ -325,13 +258,7 @@ var cachedBackend;
 function detectBackend() {
   if (cachedBackend !== void 0) return cachedBackend;
   const p = process.platform;
-  if (p === "darwin") {
-    cachedBackend = new MacOSSecurity();
-  } else if (p === "linux") {
-    cachedBackend = new LinuxSecretTool();
-  } else {
-    cachedBackend = null;
-  }
+  cachedBackend = p === "darwin" || p === "linux" || p === "win32" ? new NativeKeyring() : null;
   return cachedBackend;
 }
 async function resolveApiKeyFromKeychain() {
