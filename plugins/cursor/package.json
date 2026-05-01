@@ -6,6 +6,6 @@
   "type": "module",
   "main": "scripts/bundle/cursor-companion.mjs",
   "dependencies": {
-    "@cursor/sdk": "^1.0.9"
+    "@cursor/sdk": "^1.0.11"
   }
 }

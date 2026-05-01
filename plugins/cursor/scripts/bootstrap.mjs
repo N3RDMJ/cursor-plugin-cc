@@ -11,7 +11,7 @@ const marker = join(pluginRoot, "node_modules", "@cursor", "sdk");
 
 if (!existsSync(marker)) {
   try {
-    execSync("npm install --omit=dev --ignore-scripts=false", {
+    execSync("npm install --omit=dev --ignore-scripts", {
       cwd: pluginRoot,
       stdio: "pipe",
       timeout: 60_000,
