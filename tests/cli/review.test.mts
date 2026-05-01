@@ -158,7 +158,7 @@ describe("CLI: review", () => {
     expect(await companionMain(argv("adversarial-review"), io)).toBe(0);
     const prompt = sentPrompt(agent);
     expect(prompt).toContain("adversarial reviewer");
-    expect(prompt).toContain("challenge design choices");
+    expect(prompt).toContain("Challenge design choices");
   });
 
   it("adversarial-review forwards positional focus text to the prompt", async () => {

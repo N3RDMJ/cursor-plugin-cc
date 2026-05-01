@@ -52,7 +52,7 @@ export async function runAgentTaskForeground(opts: RunAgentTaskOptions): Promise
       },
       onEvent: (event: SDKMessage) => {
         for (const ae of toAgentEvents(event)) {
-          const rendered = renderStreamEvent(ae, { quietStatus: true });
+          const rendered = renderStreamEvent(ae, { quietStatus: true, quietThinking: true });
           if (rendered.stdout) io.stdout.write(rendered.stdout);
           if (rendered.stderr) {
             io.stderr.write(rendered.stderr);
