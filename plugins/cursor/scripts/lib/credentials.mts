@@ -1,5 +1,3 @@
-import { Entry } from "@napi-rs/keyring";
-
 const SERVICE = "cursor-plugin-cc";
 const ACCOUNT = "default";
 
@@ -22,6 +20,7 @@ class NativeKeyring implements KeychainBackend {
 
   async get(): Promise<string | undefined> {
     try {
+      const Entry = await loadEntry();
       const val = new Entry(SERVICE, ACCOUNT).getPassword();
       return val && val.length > 0 ? val : undefined;
     } catch {
@@ -30,11 +29,13 @@ class NativeKeyring implements KeychainBackend {
   }
 
   async set(secret: string): Promise<void> {
+    const Entry = await loadEntry();
     new Entry(SERVICE, ACCOUNT).setPassword(secret);
   }
 
   async delete(): Promise<void> {
     try {
+      const Entry = await loadEntry();
       new Entry(SERVICE, ACCOUNT).deletePassword();
     } catch {
       /* already absent */
@@ -43,6 +44,12 @@ class NativeKeyring implements KeychainBackend {
 }
 
 let cachedBackend: KeychainBackend | null | undefined;
+let entryPromise: Promise<typeof import("@napi-rs/keyring").Entry> | undefined;
+
+async function loadEntry(): Promise<typeof import("@napi-rs/keyring").Entry> {
+  entryPromise ??= import("@napi-rs/keyring").then((mod) => mod.Entry);
+  return entryPromise;
+}
 
 export function detectBackend(): KeychainBackend | null {
   if (cachedBackend !== undefined) return cachedBackend;

@@ -231,13 +231,13 @@ import {
 } from "@cursor/sdk";
 
 // plugins/cursor/scripts/lib/credentials.mts
-import { Entry } from "@napi-rs/keyring";
 var SERVICE = "cursor-plugin-cc";
 var ACCOUNT = "default";
 var NativeKeyring = class {
   name = "OS keychain";
   async get() {
     try {
+      const Entry = await loadEntry();
       const val = new Entry(SERVICE, ACCOUNT).getPassword();
       return val && val.length > 0 ? val : void 0;
     } catch {
@@ -245,16 +245,23 @@ var NativeKeyring = class {
     }
   }
   async set(secret) {
+    const Entry = await loadEntry();
     new Entry(SERVICE, ACCOUNT).setPassword(secret);
   }
   async delete() {
     try {
+      const Entry = await loadEntry();
       new Entry(SERVICE, ACCOUNT).deletePassword();
     } catch {
     }
   }
 };
 var cachedBackend;
+var entryPromise;
+async function loadEntry() {
+  entryPromise ??= import("@napi-rs/keyring").then((mod) => mod.Entry);
+  return entryPromise;
+}
 function detectBackend() {
   if (cachedBackend !== void 0) return cachedBackend;
   const p = process.platform;
