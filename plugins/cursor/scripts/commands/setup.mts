@@ -1,10 +1,22 @@
-import type { ModelSelection } from "@cursor/sdk";
+import type { ModelSelection, SDKModel } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, parseArgs, UsageError } from "../lib/args.mjs";
-import { listModels, resolveApiKey, whoami } from "../lib/cursor-agent.mjs";
+import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
+import {
+  DEFAULT_MODEL,
+  listModels,
+  resolveApiKey,
+  validateModel,
+  whoami,
+} from "../lib/cursor-agent.mjs";
 import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
+import {
+  clearDefaultModel,
+  type DefaultModelSource,
+  resolveDefaultModel,
+  setDefaultModel,
+} from "../lib/user-config.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const NODE_MIN_MAJOR = 18;
@@ -26,6 +38,13 @@ Validates the plugin runtime:
 Stop review gate (per workspace, opt-in):
   --enable-gate        Turn on the Stop review gate for this workspace
   --disable-gate       Turn off the Stop review gate for this workspace
+
+Default model (user-wide, used when --model is not passed):
+  --set-model <id>     Persist <id> as the default for new agent runs.
+                       Validated against Cursor.models.list().
+  --clear-model        Remove the persisted default (revert to ${DEFAULT_MODEL.id}).
+                       Resolution order: --model flag > CURSOR_MODEL env >
+                       persisted default > ${DEFAULT_MODEL.id} fallback.
 
 flags:
   --json               Machine-readable output
@@ -85,20 +104,29 @@ interface SetupReport {
   apiKey: { ok: boolean; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
   models: { ok: boolean; choices: ModelChoice[]; error?: string };
+  defaultModel: { id: string; source: DefaultModelSource };
   gate: { enabled: boolean; workspaceRoot: string };
 }
 
 interface BuildReportInput {
   workspaceRoot: string;
   gateEnabled: boolean;
+  /** Catalog already fetched by the caller — skips the duplicate list call. */
+  prefetchedCatalog?: SDKModel[];
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 async function buildReport(input: BuildReportInput): Promise<SetupReport> {
+  const resolved = resolveDefaultModel(DEFAULT_MODEL);
   const report: SetupReport = {
     node: { ok: nodeMajor() >= NODE_MIN_MAJOR, version: process.versions.node },
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
+    defaultModel: { id: resolved.model.id, source: resolved.source },
     gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot },
   };
 
@@ -106,24 +134,27 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
     resolveApiKey();
     report.apiKey.ok = true;
   } catch (err) {
-    report.apiKey.error = err instanceof Error ? err.message : String(err);
+    report.apiKey.error = errorMessage(err);
     return report;
   }
 
-  try {
-    const me = await whoami();
+  const modelsPromise = input.prefetchedCatalog
+    ? Promise.resolve(input.prefetchedCatalog)
+    : listModels();
+  const [accountResult, modelsResult] = await Promise.allSettled([whoami(), modelsPromise]);
+
+  if (accountResult.status === "fulfilled") {
     report.account.ok = true;
-    report.account.apiKeyName = me.apiKeyName;
-  } catch (err) {
-    report.account.error = err instanceof Error ? err.message : String(err);
+    report.account.apiKeyName = accountResult.value.apiKeyName;
+  } else {
+    report.account.error = errorMessage(accountResult.reason);
   }
 
-  try {
-    const models = await listModels();
-    report.models.choices = modelChoices(models);
+  if (modelsResult.status === "fulfilled") {
+    report.models.choices = modelChoices(modelsResult.value);
     report.models.ok = report.models.choices.length > 0;
-  } catch (err) {
-    report.models.error = err instanceof Error ? err.message : String(err);
+  } else {
+    report.models.error = errorMessage(modelsResult.reason);
   }
 
   return report;
@@ -151,9 +182,23 @@ function renderReport(report: SetupReport): string {
     lines.push(`Models      fail  ${report.models.error}`);
   }
   lines.push(
+    `Default     ${report.defaultModel.id}  (${describeSource(report.defaultModel.source)})`,
+  );
+  lines.push(
     `Stop gate   ${report.gate.enabled ? "on" : "off"}   (workspace: ${report.gate.workspaceRoot})`,
   );
   return `${lines.join("\n")}\n`;
+}
+
+function describeSource(source: DefaultModelSource): string {
+  switch (source) {
+    case "env":
+      return "from CURSOR_MODEL env";
+    case "config":
+      return "from persisted default";
+    case "fallback":
+      return "built-in fallback";
+  }
 }
 
 export async function runSetup(args: readonly string[], io: CommandIO): Promise<ExitCode> {
@@ -163,6 +208,8 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
       help: "boolean",
       "enable-gate": "boolean",
       "disable-gate": "boolean",
+      "set-model": "string",
+      "clear-model": "boolean",
     },
     short: { h: "help" },
   });
@@ -177,6 +224,26 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
   }
 
+  const setModelId = optionalString(parsed, "set-model");
+  const clearModel = bool(parsed, "clear-model");
+  if (setModelId && clearModel) {
+    throw new UsageError("--set-model and --clear-model are mutually exclusive");
+  }
+  if (setModelId !== undefined && setModelId.trim() === "") {
+    throw new UsageError("--set-model requires a non-empty model id");
+  }
+
+  // Pre-fetch the catalog when validating --set-model so buildReport can
+  // reuse it instead of listing models a second time.
+  let prefetchedCatalog: SDKModel[] | undefined;
+  if (setModelId) {
+    prefetchedCatalog = await listModels();
+    await validateModel({ id: setModelId }, { catalog: prefetchedCatalog });
+    setDefaultModel({ id: setModelId });
+  } else if (clearModel) {
+    clearDefaultModel();
+  }
+
   const workspaceRoot = resolveWorkspaceRoot(io.cwd());
   const stateDir = resolveStateDir(workspaceRoot);
   const togglingGate = enableGate || disableGate;
@@ -184,7 +251,11 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     ? setGateEnabled(stateDir, enableGate).enabled
     : readGateConfig(stateDir).enabled;
 
-  const report = await buildReport({ workspaceRoot, gateEnabled });
+  const report = await buildReport({
+    workspaceRoot,
+    gateEnabled,
+    ...(prefetchedCatalog ? { prefetchedCatalog } : {}),
+  });
 
   if (bool(parsed, "json")) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

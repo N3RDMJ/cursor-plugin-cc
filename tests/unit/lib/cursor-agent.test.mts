@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type {
   Run,
   RunOperation,
@@ -48,6 +52,11 @@ import {
   validateModel,
   whoami,
 } from "../../../plugins/cursor/scripts/lib/cursor-agent.mjs";
+import { STATE_ROOT_ENV } from "../../../plugins/cursor/scripts/lib/state.mjs";
+import {
+  setDefaultModel,
+  USER_CONFIG_ENV_MODEL,
+} from "../../../plugins/cursor/scripts/lib/user-config.mjs";
 
 function makeRun(events: SDKMessage[], result: RunResult): Run {
   let status: RunStatus = "running";
@@ -107,13 +116,27 @@ function fakeAgent(run: Run): SDKAgent {
   };
 }
 
+let stateRoot: string;
+let savedStateRoot: string | undefined;
+let savedModelEnv: string | undefined;
+
 beforeEach(() => {
   process.env.CURSOR_API_KEY = "test-key";
+  stateRoot = mkdtempSync(path.join(tmpdir(), "cursor-agent-state-"));
+  savedStateRoot = process.env[STATE_ROOT_ENV];
+  savedModelEnv = process.env[USER_CONFIG_ENV_MODEL];
+  process.env[STATE_ROOT_ENV] = stateRoot;
+  delete process.env[USER_CONFIG_ENV_MODEL];
 });
 
 afterEach(() => {
   vi.clearAllMocks();
   delete process.env.CURSOR_API_KEY;
+  rmSync(stateRoot, { recursive: true, force: true });
+  if (savedStateRoot === undefined) delete process.env[STATE_ROOT_ENV];
+  else process.env[STATE_ROOT_ENV] = savedStateRoot;
+  if (savedModelEnv === undefined) delete process.env[USER_CONFIG_ENV_MODEL];
+  else process.env[USER_CONFIG_ENV_MODEL] = savedModelEnv;
 });
 
 describe("resolveApiKey", () => {
@@ -161,6 +184,40 @@ describe("createAgent / resumeAgent", () => {
       model: DEFAULT_MODEL,
       local: { cwd: "/tmp/repo" },
     });
+  });
+
+  it("createAgent uses CURSOR_MODEL when no model is passed", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+    process.env[USER_CONFIG_ENV_MODEL] = "from-env";
+
+    await createAgent({ cwd: "/tmp/repo" });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({ id: "from-env" });
+  });
+
+  it("createAgent uses the persisted user-config default when env is unset", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+    setDefaultModel({ id: "from-config" });
+
+    await createAgent({ cwd: "/tmp/repo" });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({ id: "from-config" });
+  });
+
+  it("createAgent prefers explicit model over env and config", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+    process.env[USER_CONFIG_ENV_MODEL] = "from-env";
+    setDefaultModel({ id: "from-config" });
+
+    await createAgent({ cwd: "/tmp/repo", model: { id: "from-flag" } });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({ id: "from-flag" });
   });
 
   it("createAgent honors model override and settingSources", async () => {

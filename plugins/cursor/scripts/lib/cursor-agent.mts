@@ -18,6 +18,7 @@ import {
 
 import { detectCloudRepository } from "./git.mjs";
 import { type RetryOptions, withRetry } from "./retry.mjs";
+import { resolveDefaultModel } from "./user-config.mjs";
 
 export const DEFAULT_MODEL: ModelSelection = { id: "composer-2" };
 
@@ -170,7 +171,7 @@ export function buildAgentOptionsFromFlags(
 
 function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
   const apiKey = resolveApiKey(opts.apiKey);
-  const model = opts.model ?? DEFAULT_MODEL;
+  const model = opts.model ?? resolveDefaultModel(DEFAULT_MODEL).model;
   const mode: AgentMode = opts.mode ?? "local";
 
   const base: AgentOptions = {
@@ -328,12 +329,17 @@ export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]>
   return withRetry(() => Cursor.models.list({ apiKey }), opts.retry);
 }
 
-/** Confirm a ModelSelection.id is in the catalog. Throws on miss. */
+/**
+ * Confirm a ModelSelection.id is in the catalog. Throws on miss. Pass
+ * `catalog` when you've already fetched the list (e.g. to share one fetch
+ * between validation and a subsequent report) — otherwise the catalog is
+ * fetched fresh.
+ */
 export async function validateModel(
   model: ModelSelection,
-  opts: RequestOptions = {},
+  opts: RequestOptions & { catalog?: SDKModel[] } = {},
 ): Promise<SDKModel> {
-  const models = await listModels(opts);
+  const models = opts.catalog ?? (await listModels(opts));
   const match = models.find((m) => m.id === model.id);
   if (!match) {
     const known = models.map((m) => m.id).join(", ") || "(none)";
