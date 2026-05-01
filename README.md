@@ -48,11 +48,23 @@ Reload plugins:
 /reload-plugins
 ```
 
-Export your API key and run setup:
+Set up your API key using one of these options:
+
+**Option A — Store in OS keychain (recommended)**
+
+```bash
+/cursor:setup --login
+```
+
+Claude will walk you through it — either via secure hidden input or by pasting the key in chat. The key is validated against the Cursor API and stored in your OS keychain.
+
+**Option B — Environment variable**
 
 ```bash
 export CURSOR_API_KEY=key_...
 ```
+
+Then verify everything is working:
 
 ```bash
 /cursor:setup
@@ -274,7 +286,7 @@ Then check in with:
 
 ## Cursor Integration
 
-The plugin wraps the [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) to communicate with Cursor's agent runtime. It uses your `CURSOR_API_KEY` for authentication — the key is never persisted to disk and is scrubbed from all logs and error messages.
+The plugin wraps the [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) to communicate with Cursor's agent runtime. Authentication uses your Cursor API key, resolved in this order: `CURSOR_API_KEY` env var, OS keychain (via `/cursor:setup --login`), or error with setup instructions. The key is scrubbed from all logs and error messages.
 
 ### State and Storage
 
@@ -299,7 +311,7 @@ Delegated tasks can be resumed directly in Cursor by using the agent ID from `/c
 
 ### Do I need a separate Cursor account?
 
-Yes. This plugin requires a Cursor subscription with API access. Export your key as `CURSOR_API_KEY` and run `/cursor:setup` to verify.
+Yes. This plugin requires a Cursor subscription with API access. Run `/cursor:setup --login` to store your key in the OS keychain, or export it as `CURSOR_API_KEY`. Then run `/cursor:setup` to verify.
 
 ### Does the plugin modify my files?
 
