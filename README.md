@@ -4,6 +4,18 @@ Use Cursor from inside Claude Code for code reviews or to delegate tasks to Curs
 
 This plugin is for Claude Code users who want an easy way to use Cursor from the workflow they already have.
 
+## Why a Plugin Instead of Just the CLI?
+
+Cursor has its own editor and CLI, so why wrap it in a Claude Code plugin?
+
+- **Stay in your flow.** You don't have to switch windows or learn a separate tool. Reviews and tasks run from the same terminal session where you're already working with Claude.
+- **Two models, one conversation.** Claude sees the full conversation context. When it delegates to Cursor, it can frame the task precisely — and when Cursor comes back, Claude can act on the result immediately. You get a second opinion without copy-pasting context between tools.
+- **Background jobs with zero setup.** Kick off a long-running Cursor task with `--background`, keep working with Claude, and check back with `/cursor:status`. No tmux, no second terminal.
+- **Structured review output.** The plugin parses Cursor's review into a machine-readable verdict (`approve` / `needs-attention`) with line-level findings. Claude can read and act on these directly — or the Stop review gate can block automatically on critical issues.
+- **Automatic context passing.** The plugin reads your `git diff`, detects your default branch, resolves your workspace root, and passes all of it to Cursor. You type `/cursor:review` and it just works.
+
+If you already use Cursor standalone and don't need these integrations, you don't need this plugin. But if Claude Code is your primary workflow and you want Cursor as a second agent you can call on without context-switching, this is the shortest path.
+
 ## What You Get
 
 - `/cursor:review` for a structured read-only review
