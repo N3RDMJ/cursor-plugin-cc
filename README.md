@@ -1,173 +1,302 @@
-# cursor-plugin-cc
+# Cursor plugin for Claude Code
 
-A [Claude Code](https://docs.claude.com/en/docs/claude-code) plugin that delegates implementation tasks
-and code reviews to a [Cursor](https://cursor.com) AI agent via [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk).
+Use Cursor from inside Claude Code for code reviews or to delegate tasks to Cursor's AI agent.
 
-Mirrors the architecture of [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc) but
-targets Cursor instead of Codex.
+This plugin is for Claude Code users who want an easy way to use Cursor from the workflow they already have.
 
-## What you get
+## What You Get
 
-| Slash command | What it does |
-|---------------|--------------|
-| `/cursor:setup` | Verify Node, `CURSOR_API_KEY`, account, model catalog. Toggle the Stop review gate. |
-| `/cursor:task <prompt>` | Send an implementation task to Cursor (read-only by default; pass `--write` to allow edits). |
-| `/cursor:resume <agent-id\|--last\|--list> [prompt]` | Reattach to an existing Cursor agent and continue the conversation. |
-| `/cursor:review` | Structured review of the working-tree diff (`approve` / `needs-attention` + findings). |
-| `/cursor:adversarial-review` | Same shape, but the agent challenges design choices instead of hunting defects. |
-| `/cursor:status [job-id]` | List recent jobs (or show one in detail). |
-| `/cursor:result <job-id>` | Print the persisted output of a completed job. |
-| `/cursor:cancel <job-id>` | Cancel an active run. |
-
-A `cursor-rescue` subagent wraps `/cursor:task --write` for cases where Claude wants to delegate
-a hard problem to Cursor in the middle of a turn.
-
-The plugin also installs a **Stop review gate** (opt-in): when enabled, every Stop is gated on a
-Cursor review of Claude's working-tree changes. Critical findings block the stop and Claude has to
-address them before finishing.
+- `/cursor:review` for a structured read-only review
+- `/cursor:adversarial-review` for a steerable challenge review
+- `/cursor:task`, `/cursor:resume`, `/cursor:status`, `/cursor:result`, and `/cursor:cancel` to delegate work and manage background jobs
+- An optional **Stop review gate** that blocks Claude's Stop on critical findings
 
 ## Requirements
 
-- Node.js >= 18
-- A Cursor API key (Cursor subscription required) — see
-  [Cursor Agents docs](https://docs.cursor.com/agents) for how to provision one.
-- Git (the plugin reads `git diff` / `git status` for context)
+- **Cursor subscription with an API key.** See the [Cursor Agents docs](https://docs.cursor.com/agents) for how to provision one.
+- **Node.js 18 or later**
 
-Export the key before launching Claude Code:
+## Install
+
+Add the marketplace in Claude Code:
+
+```bash
+/plugin marketplace add /path/to/cursor-plugin-cc
+```
+
+Install the plugin:
+
+```bash
+/plugin install cursor@cursor-plugin-cc
+```
+
+Reload plugins:
+
+```bash
+/reload-plugins
+```
+
+Export your API key and run setup:
 
 ```bash
 export CURSOR_API_KEY=key_...
 ```
 
-## Installation
-
-From this repository's marketplace:
-
-```text
-/plugin marketplace add /path/to/cursor-plugin-cc
-/plugin install cursor@cursor-plugin-cc
+```bash
+/cursor:setup
 ```
 
-After installation, run `/cursor:setup` to verify everything is wired up.
+`/cursor:setup` will tell you whether Cursor is ready. It verifies Node.js, the API key, your account, and the available model catalog.
 
-## Quick start
+After install, you should see:
 
-```text
-/cursor:setup                       # confirm Node, API key, models
-/cursor:task "Refactor auth module" --write
-/cursor:review                      # review the working-tree diff
-/cursor:status                      # see recent jobs
-/cursor:result task-abcdef123456    # retrieve a job's output
+- the slash commands listed below
+- the `cursor:cursor-rescue` subagent in `/agents`
+
+One simple first run is:
+
+```bash
+/cursor:review --background
+/cursor:status
+/cursor:result
 ```
 
-### Stop review gate
+## Usage
 
-```text
-/cursor:setup --enable-gate         # turn on for this workspace
-/cursor:setup --disable-gate        # turn off
+### `/cursor:review`
+
+Runs a structured Cursor review on your current work. Returns an `approve` or `needs-attention` verdict with line-level findings.
+
+> [!NOTE]
+> Code review especially for multi-file changes might take a while. It's generally recommended to run it in the background.
+
+Use it when you want:
+
+- a review of your current uncommitted changes
+- a review of your branch compared to a base branch like `main`
+
+Use `--base <ref>` for branch review. Use `--staged` for staged-only changes. It also supports `--background` and `--json`. It is not steerable and does not take custom focus text. Use [`/cursor:adversarial-review`](#cursoradversarial-review) when you want to challenge a specific decision or risk area.
+
+Examples:
+
+```bash
+/cursor:review
+/cursor:review --base main
+/cursor:review --staged
+/cursor:review --background
 ```
 
-The gate is per-workspace and disabled by default. State lives in
-`~/.claude/cursor-plugin/<workspace-slug>/gate.json`.
+This command is read-only and will not perform any changes.
 
-## Subcommand flags
+### `/cursor:adversarial-review`
 
-`task`:
+Runs a **steerable** review that questions the chosen implementation and design.
 
-| Flag | Effect |
-|------|--------|
-| `--write` | Allow file modifications (default: read-only analysis). |
-| `--resume-last` | Resume the most recent task agent for this workspace. |
-| `--background` | Start the run, return the job id, exit. |
-| `--force` | Expire any wedged active local run before sending. |
-| `--cloud` | Run against the detected GitHub origin in Cursor's cloud. |
-| `--prompt-file <path>` | Read the prompt body from disk (concatenated after any positional prompt). |
-| `--model <id>` | Override the default model (`composer-2`). |
-| `--timeout <ms>` | Cancel if the run exceeds this duration. |
-| `--json` | Emit the final result as a single JSON line. |
+It can be used to pressure-test assumptions, tradeoffs, failure modes, and whether a different approach would have been safer or simpler.
 
-`resume`:
+It uses the same review target selection as `/cursor:review`, including `--base <ref>` for branch review. It also supports `--background` and `--json`. Unlike `/cursor:review`, it can take extra focus text after the flags.
 
-| Flag | Effect |
-|------|--------|
-| `--last` | Resume the most recent task agent for this workspace (skip `<agent-id>`). |
-| `--list` | Print known agent ids for this workspace, then exit. |
-| `--list --remote` | With `--list`: query the SDK for durable agents instead of the local job index. Combine with `--cloud` to list cloud-runtime agents. |
-| `--limit <n>` | With `--list`: cap the number of rows (default 10). |
-| `--write`, `--background`, `--force`, `--cloud`, `--model <id>`, `--timeout <ms>`, `--json` | Same as `task`. |
+Use it when you want:
 
-```text
-/cursor:resume --list                       # discover agent ids
-/cursor:resume agent-abc123 "now do X"      # continue a specific agent
-/cursor:resume --last "and then Y" --write  # follow up on the most recent run
+- a review before shipping that challenges the direction, not just the code details
+- review focused on design choices, tradeoffs, hidden assumptions, and alternative approaches
+- pressure-testing around specific risk areas like auth, data loss, race conditions, or reliability
+
+Examples:
+
+```bash
+/cursor:adversarial-review
+/cursor:adversarial-review --base main challenge whether this was the right caching design
+/cursor:adversarial-review --background look for race conditions and question the chosen approach
 ```
 
-`review` / `adversarial-review`:
+This command is read-only. It does not fix code.
 
-| Flag | Effect |
-|------|--------|
-| `--staged` | Review only staged changes (`git diff --cached`). Mutually exclusive with `--scope branch`. |
-| `--scope <auto\|working-tree\|branch>` | `auto` (default) picks working-tree if dirty, else branch vs detected default branch (`main`/`master`/`trunk`). |
-| `--base <ref>` | Diff against `<ref>`. Implies branch scope. |
-| `--model <id>`, `--timeout <ms>`, `--json` | Same as `task`. |
+### `/cursor:task`
 
-`/cursor:adversarial-review` additionally accepts free-form positional **focus
-text** that becomes the priority axis for the reviewer (e.g.
-`/cursor:adversarial-review concurrency and atomicity`).
+Sends an implementation task to a Cursor agent.
 
-`status`:
+Use it when you want Cursor to:
 
-| Flag | Effect |
-|------|--------|
-| `--type`, `--status`, `--limit <n>` | Filter the job table. |
-| `<job-id> --wait` | Block until the job reaches a terminal state. |
-| `--timeout-ms <ms>` | Max time to wait (default 240000). |
-| `--poll-ms <ms>` | Poll interval (default 1000). |
-| `--json` | Emit JSON instead of the rendered table/detail. |
+- implement a feature or refactor
+- investigate a bug
+- take a pass with a different model
 
-## Where state lives
+By default the task runs **read-only** (analysis only). Pass `--write` to allow file modifications.
+
+> [!NOTE]
+> Depending on the task and the model, these tasks might take a long time. It's generally recommended to use `--background` or move the agent to the background.
+
+Examples:
+
+```bash
+/cursor:task "Refactor the auth module to use async/await"
+/cursor:task "Fix the flaky integration test" --write
+/cursor:task "Investigate why the build fails" --background
+/cursor:task --prompt-file spec.md --write
+/cursor:task "Quick analysis" --model claude-4-opus --timeout 60000
+```
+
+You can also just ask for a task to be delegated to Cursor:
+
+```text
+Ask Cursor to redesign the database connection to be more resilient.
+```
+
+### `/cursor:resume`
+
+Reattaches to an existing Cursor agent and continues the conversation.
+
+Use it when you want to:
+
+- follow up on a previous task
+- send additional instructions to a running agent
+- discover which agents are available
+
+Examples:
+
+```bash
+/cursor:resume --list                          # discover agent IDs
+/cursor:resume --list --remote                 # query the SDK for durable agents
+/cursor:resume agent-abc123 "now do X"         # continue a specific agent
+/cursor:resume --last "and then Y" --write     # follow up on the most recent run
+```
+
+It accepts all `task` flags (`--write`, `--background`, `--model`, etc.).
+
+### `/cursor:status`
+
+Shows running and recent Cursor jobs for the current workspace.
+
+Examples:
+
+```bash
+/cursor:status
+/cursor:status task-abc123
+/cursor:status task-abc123 --wait              # block until the job finishes
+```
+
+Use it to:
+
+- check progress on background work
+- see the latest completed job
+- confirm whether a task is still running
+
+Supports `--type`, `--status`, and `--limit` filters. Use `--wait` with `--timeout-ms` and `--poll-ms` to block until a job reaches a terminal state.
+
+### `/cursor:result`
+
+Shows the final stored output for a finished job.
+
+Examples:
+
+```bash
+/cursor:result
+/cursor:result task-abc123
+```
+
+### `/cursor:cancel`
+
+Cancels an active background Cursor job.
+
+Examples:
+
+```bash
+/cursor:cancel
+/cursor:cancel task-abc123
+```
+
+### `/cursor:setup`
+
+Checks whether Cursor is configured and ready. Verifies Node.js, `CURSOR_API_KEY`, your Cursor account, and the available model catalog.
+
+You can also use `/cursor:setup` to manage the review gate and default model.
+
+#### Enabling the review gate
+
+```bash
+/cursor:setup --enable-gate
+/cursor:setup --disable-gate
+```
+
+When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted Cursor review of Claude's working-tree changes. If that review finds critical issues, the stop is blocked so Claude can address them first.
+
+> [!WARNING]
+> The review gate can create a long-running Claude/Cursor loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
+
+#### Setting a default model
+
+```bash
+/cursor:setup --set-model claude-4-opus
+```
+
+Resolution order: `--model` flag > `CURSOR_MODEL` env var > saved config > `composer-2`.
+
+## Typical Flows
+
+### Review Before Shipping
+
+```bash
+/cursor:review
+```
+
+### Hand a Problem to Cursor
+
+```bash
+/cursor:task "investigate why the build is failing" --write
+```
+
+### Start Something Long-Running
+
+```bash
+/cursor:adversarial-review --background
+/cursor:task "investigate the flaky test" --background
+```
+
+Then check in with:
+
+```bash
+/cursor:status
+/cursor:result
+```
+
+## Cursor Integration
+
+The plugin wraps the [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) to communicate with Cursor's agent runtime. It uses your `CURSOR_API_KEY` for authentication — the key is never persisted to disk and is scrubbed from all logs and error messages.
+
+### State and Storage
+
+Job state is persisted to the filesystem so results survive across sessions:
 
 ```
 ~/.claude/cursor-plugin/<workspace-slug>/
-├── state.json          # job index (50 most recent retained)
-├── <jobId>.json        # per-job persisted result
-├── <jobId>.log         # per-job streaming events
-├── session.json        # current Claude Code session
-└── gate.json           # per-workspace Stop review gate config
+├── state.json          # job index (50 most recent)
+├── <jobId>.json        # per-job result
+├── <jobId>.log         # streaming event log
+├── session.json        # current session metadata
+└── gate.json           # review gate config
 ```
 
-Override the root with `CURSOR_PLUGIN_STATE_ROOT=/some/path` (handy for tests and dev).
+Override the root with `CURSOR_PLUGIN_STATE_ROOT` (useful for tests and development).
 
-The plugin **never persists `CURSOR_API_KEY`** to disk. Error messages and per-job logs are
-scrubbed of the key before they're written, so a transient SDK failure that happens to embed the
-key in a request URL won't leak into job state.
+### Moving the Work Over to Cursor
 
-## How it's organized
+Delegated tasks can be resumed directly in Cursor by using the agent ID from `/cursor:status` or `/cursor:result`. Use `/cursor:resume <agent-id>` to continue from Claude Code, or open the agent in Cursor's own UI.
 
-```
-plugins/cursor/
-├── .claude-plugin/plugin.json     # plugin manifest
-├── commands/                       # /cursor:* slash command markdown
-├── agents/                         # subagent forwarders
-├── hooks/hooks.json                # SessionStart/End + Stop review gate
-├── skills/                         # context docs Claude reads
-├── scripts/                        # TypeScript runtime (.mts → .mjs)
-│   ├── cursor-companion.mts        # CLI entry
-│   ├── session-lifecycle-hook.mts
-│   ├── stop-review-gate-hook.mts
-│   ├── commands/                   # one handler per subcommand
-│   └── lib/                        # cursor-agent, state, render, git, retry, …
-└── package.json
-```
+## FAQ
 
-Slash command markdown files are prompt instructions for Claude — they're not executable. All
-runtime logic lives under `scripts/`.
+### Do I need a separate Cursor account?
 
-## Contributing
+Yes. This plugin requires a Cursor subscription with API access. Export your key as `CURSOR_API_KEY` and run `/cursor:setup` to verify.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, test commands, and the conventional-commit
-expectation.
+### Does the plugin modify my files?
 
-## License
+Only when you explicitly pass `--write` to `/cursor:task` or `/cursor:resume`. All review commands are read-only.
 
-MIT — see [LICENSE](./LICENSE).
+### What models can I use?
+
+Run `/cursor:setup` to see the available model catalog from your Cursor account. The default is `composer-2`, overridable via `--model`, `CURSOR_MODEL` env var, or `/cursor:setup --set-model`.
+
+### Will the review gate drain my usage?
+
+It can. The gate runs a Cursor review on every Claude Stop, which counts against your Cursor usage limits. Only enable it when you plan to actively monitor the session.
