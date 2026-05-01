@@ -7,7 +7,7 @@ disable-model-invocation: true
 # /cursor:resume
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs resume $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs resume $ARGUMENTS
 ```
 
 Resume a durable Cursor agent. The agent keeps the context from prior runs,

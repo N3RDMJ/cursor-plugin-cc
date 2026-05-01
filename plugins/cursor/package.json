@@ -4,5 +4,8 @@
   "private": true,
   "description": "Claude Code plugin entry — see scripts/ for the CLI.",
   "type": "module",
-  "main": "scripts/dist/cursor-companion.mjs"
+  "main": "scripts/bundle/cursor-companion.mjs",
+  "dependencies": {
+    "@cursor/sdk": "^1.0.9"
+  }
 }

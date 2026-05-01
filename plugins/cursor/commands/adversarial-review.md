@@ -11,7 +11,7 @@ defects, this prompt pushes back on premature abstractions, hidden coupling,
 unnecessary state, and brittle assumptions.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs adversarial-review $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs adversarial-review $ARGUMENTS
 ```
 
 Same output shape and flags as `/cursor:review`, plus free-form positional

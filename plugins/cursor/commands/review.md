@@ -9,7 +9,7 @@ disable-model-invocation: true
 Run a Cursor-driven structured review of the current diff.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs review $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs review $ARGUMENTS
 ```
 
 Useful flags:

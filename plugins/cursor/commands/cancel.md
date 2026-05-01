@@ -7,7 +7,7 @@ disable-model-invocation: true
 # /cursor:cancel
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs cancel $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs cancel $ARGUMENTS
 ```
 
 Required: a job id.
