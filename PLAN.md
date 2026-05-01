@@ -772,7 +772,9 @@ to pass `--model` on every command.
       persisted as `<state-root>/config.json` (sibling of per-workspace dirs).
       Exposes `readUserConfig`/`writeUserConfig`/`setDefaultModel`/
       `clearDefaultModel` plus `resolveDefaultModel(fallback)` returning
-      `{ model, source }` where `source ∈ "flag" | "env" | "config" | "fallback"`.
+      `{ model, source }` where `source ∈ "env" | "config" | "fallback"`.
+      The `--model` flag short-circuits at the call site (`opts.model ??
+      resolveDefaultModel(...)`), so it never reaches the resolver.
 - [x] `lib/cursor-agent.mts` `buildAgentOptions` calls `resolveDefaultModel`
       so `createAgent`/`resumeAgent`/`oneShot` honor (in order):
       explicit `--model` → `CURSOR_MODEL` env → persisted config → built-in
@@ -783,7 +785,7 @@ to pass `--model` on every command.
       a `Default` row plus `defaultModel: { id, source }` in `--json`.
 - [x] `commands/setup.md` documents the resolution order and the new flags.
 - [x] Tests: `tests/unit/lib/user-config.test.mts` (round-trip, malformed
-      config, resolution priority including override and whitespace env),
+      config, resolution priority including whitespace env),
       `tests/cli/setup.test.mts` (built-in row text, `--set-model` happy
       path, unknown id rejected, `--clear-model`, mutual exclusion, env
       wins over config), and `tests/unit/lib/cursor-agent.test.mts` covers
