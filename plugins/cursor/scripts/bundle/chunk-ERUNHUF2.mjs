@@ -1,6 +1,7 @@
 import {
   appendJobLog,
   ensureStateDir,
+  jobLogMtimeMs,
   readJob,
   readJson,
   readStateIndex,
@@ -10,7 +11,7 @@ import {
   writeJob,
   writeJsonAtomic,
   writeStateIndex
-} from "./chunk-P7QODZNJ.mjs";
+} from "./chunk-PI7XIE4N.mjs";
 
 // plugins/cursor/scripts/lib/args.mts
 var UsageError = class extends Error {
@@ -229,6 +230,141 @@ import {
   Cursor
 } from "@cursor/sdk";
 
+// plugins/cursor/scripts/lib/credentials.mts
+import { execFile as execFileCb, spawn } from "node:child_process";
+import { promisify } from "node:util";
+var execFile = promisify(execFileCb);
+function spawnWithStdin(command, args, input, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { timeout: timeoutMs, stdio: ["pipe", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${command} exited with code ${code}: ${stderr.trim()}`));
+    });
+    child.stdin.end(input);
+  });
+}
+var SERVICE = "cursor-plugin-cc";
+var ACCOUNT = "default";
+var EXEC_TIMEOUT_MS = 5e3;
+var LinuxSecretTool = class {
+  name = "secret-tool (Secret Service)";
+  async get() {
+    try {
+      const { stdout } = await execFile(
+        "secret-tool",
+        ["lookup", "service", SERVICE, "account", ACCOUNT],
+        { timeout: EXEC_TIMEOUT_MS }
+      );
+      const val = stdout.trimEnd();
+      return val.length > 0 ? val : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  async set(secret) {
+    await spawnWithStdin(
+      "secret-tool",
+      ["store", "--label", `${SERVICE} API key`, "service", SERVICE, "account", ACCOUNT],
+      secret,
+      EXEC_TIMEOUT_MS
+    );
+  }
+  async delete() {
+    try {
+      await execFile("secret-tool", ["clear", "service", SERVICE, "account", ACCOUNT], {
+        timeout: EXEC_TIMEOUT_MS
+      });
+    } catch {
+    }
+  }
+};
+var MacOSSecurity = class {
+  name = "macOS Keychain";
+  async get() {
+    try {
+      const { stdout } = await execFile(
+        "security",
+        ["find-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-w"],
+        { timeout: EXEC_TIMEOUT_MS }
+      );
+      const val = stdout.trimEnd();
+      return val.length > 0 ? val : void 0;
+    } catch {
+      return void 0;
+    }
+  }
+  async set(secret) {
+    try {
+      await this.delete();
+    } catch {
+    }
+    await spawnWithStdin(
+      "security",
+      ["add-generic-password", "-s", SERVICE, "-a", ACCOUNT, "-U"],
+      `${secret}
+`,
+      EXEC_TIMEOUT_MS
+    );
+  }
+  async delete() {
+    try {
+      await execFile("security", ["delete-generic-password", "-s", SERVICE, "-a", ACCOUNT], {
+        timeout: EXEC_TIMEOUT_MS
+      });
+    } catch {
+    }
+  }
+};
+var cachedBackend;
+function detectBackend() {
+  if (cachedBackend !== void 0) return cachedBackend;
+  const p = process.platform;
+  if (p === "darwin") {
+    cachedBackend = new MacOSSecurity();
+  } else if (p === "linux") {
+    cachedBackend = new LinuxSecretTool();
+  } else {
+    cachedBackend = null;
+  }
+  return cachedBackend;
+}
+async function resolveApiKeyFromKeychain() {
+  const backend = detectBackend();
+  if (!backend) return void 0;
+  const secret = await backend.get();
+  if (!secret || secret.trim() === "") return void 0;
+  return { apiKey: secret, source: "keychain" };
+}
+async function storeApiKey(secret) {
+  const backend = detectBackend();
+  if (!backend) {
+    throw new Error(
+      "No supported keychain backend found. Use CURSOR_API_KEY environment variable instead."
+    );
+  }
+  await backend.set(secret);
+}
+async function deleteApiKey() {
+  const backend = detectBackend();
+  if (!backend) {
+    throw new Error("No supported keychain backend found.");
+  }
+  await backend.delete();
+}
+var activeKeychainSecret;
+function getActiveKeychainSecret() {
+  return activeKeychainSecret;
+}
+function setActiveKeychainSecret(secret) {
+  activeKeychainSecret = secret;
+}
+
 // plugins/cursor/scripts/lib/retry.mts
 var DEFAULT_ATTEMPTS = 3;
 var DEFAULT_BASE_DELAY_MS = 200;
@@ -299,14 +435,26 @@ function resolveDefaultModel(fallback, opts = {}) {
 
 // plugins/cursor/scripts/lib/cursor-agent.mts
 var DEFAULT_MODEL = { id: "composer-2" };
-function resolveApiKey(apiKey) {
-  const resolved = apiKey ?? process.env.CURSOR_API_KEY;
-  if (!resolved || resolved.trim() === "") {
-    throw new ConfigurationError(
-      "CURSOR_API_KEY is not set. Export your Cursor API key or pass apiKey explicitly."
-    );
+async function resolveApiKey(apiKey) {
+  if (apiKey && apiKey.trim() !== "") {
+    return { apiKey, source: "explicit" };
   }
-  return resolved;
+  const env = process.env.CURSOR_API_KEY;
+  if (env && env.trim() !== "") {
+    return { apiKey: env, source: "env" };
+  }
+  let keychainResult;
+  try {
+    keychainResult = await resolveApiKeyFromKeychain();
+  } catch {
+  }
+  if (keychainResult) {
+    setActiveKeychainSecret(keychainResult.apiKey);
+    return { apiKey: keychainResult.apiKey, source: "keychain" };
+  }
+  throw new ConfigurationError(
+    "No API key found. Run /cursor:setup --login to store one in the OS keychain, or export CURSOR_API_KEY."
+  );
 }
 function buildAgentOptionsFromFlags(workspaceRoot, flags) {
   const opts = { cwd: workspaceRoot };
@@ -317,8 +465,8 @@ function buildAgentOptionsFromFlags(workspaceRoot, flags) {
   }
   return opts;
 }
-function buildAgentOptions(opts) {
-  const apiKey = resolveApiKey(opts.apiKey);
+async function buildAgentOptions(opts) {
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   const model = opts.model ?? resolveDefaultModel(DEFAULT_MODEL).model;
   const mode = opts.mode ?? "local";
   const base = {
@@ -346,10 +494,10 @@ function buildAgentOptions(opts) {
   };
 }
 async function createAgent(opts) {
-  return Agent.create(buildAgentOptions(opts));
+  return Agent.create(await buildAgentOptions(opts));
 }
 async function resumeAgent(agentId, opts) {
-  return Agent.resume(agentId, buildAgentOptions(opts));
+  return Agent.resume(agentId, await buildAgentOptions(opts));
 }
 async function disposeAgent(agent) {
   await agent[Symbol.asyncDispose]();
@@ -397,11 +545,11 @@ async function listRemoteAgents(options) {
   }));
 }
 async function whoami(opts = {}) {
-  const apiKey = resolveApiKey(opts.apiKey);
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   return withRetry(() => Cursor.me({ apiKey }), opts.retry);
 }
 async function listModels(opts = {}) {
-  const apiKey = resolveApiKey(opts.apiKey);
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   return withRetry(() => Cursor.models.list({ apiKey }), opts.retry);
 }
 async function validateModel(model, opts = {}) {
@@ -558,7 +706,9 @@ function redactSecret(text, secret) {
   return text.split(secret).join(PLACEHOLDER);
 }
 function redactApiKey(text) {
-  return redactSecret(text, process.env.CURSOR_API_KEY);
+  let result = redactSecret(text, process.env.CURSOR_API_KEY);
+  result = redactSecret(result, getActiveKeychainSecret());
+  return result;
 }
 function redactError(error) {
   if (error instanceof Error) {
@@ -768,6 +918,8 @@ function renderError(error) {
 
 // plugins/cursor/scripts/lib/job-control.mts
 import crypto from "node:crypto";
+var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
+var STALE_JOB_TTL_MS = 30 * 60 * 1e3;
 var JOB_ID_BYTES = 6;
 function newJobId(type) {
   const prefix = type === "adversarial-review" ? "adv" : type;
@@ -854,6 +1006,9 @@ function update(stateDir, jobId, input) {
   const existing = readJob(stateDir, jobId);
   if (!existing) {
     throw new Error(`job not found: ${jobId}`);
+  }
+  if (TERMINAL_STATUSES.has(existing.status)) {
+    return existing;
   }
   const next = {
     ...existing,
@@ -952,6 +1107,24 @@ function logJobLine(stateDir, jobId, line) {
   const text = scrubbed.endsWith("\n") ? scrubbed : `${scrubbed}
 `;
   appendJobLog(stateDir, jobId, text);
+}
+function reconcileStaleJobs(stateDir, ttlMs = STALE_JOB_TTL_MS) {
+  const idx = readStateIndex(stateDir);
+  const now = Date.now();
+  const reconciled = [];
+  for (const entry of idx.jobs) {
+    if (TERMINAL_STATUSES.has(entry.status)) continue;
+    if (activeRuns.has(entry.id)) continue;
+    const age = now - new Date(entry.updatedAt).getTime();
+    if (age < ttlMs) continue;
+    if (entry.status === "running") {
+      const logMtime = jobLogMtimeMs(stateDir, entry.id);
+      if (logMtime !== void 0 && now - logMtime < ttlMs) continue;
+    }
+    markFailed(stateDir, entry.id, `stale: no update for ${Math.round(age / 6e4)} minutes`);
+    reconciled.push(entry.id);
+  }
+  return reconciled;
 }
 
 // plugins/cursor/scripts/commands/review.mts
@@ -1195,6 +1368,9 @@ export {
   parseArgs,
   optionalString,
   bool,
+  detectBackend,
+  storeApiKey,
+  deleteApiKey,
   getDiff,
   getStatus,
   getRecentCommits,
@@ -1226,6 +1402,7 @@ export {
   unregisterActiveRun,
   cancelJob,
   logJobLine,
+  reconcileStaleJobs,
   loadPromptTemplate,
   interpolateTemplate,
   compactText,

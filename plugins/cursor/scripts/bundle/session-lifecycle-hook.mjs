@@ -9,7 +9,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeSession
-} from "./chunk-P7QODZNJ.mjs";
+} from "./chunk-PI7XIE4N.mjs";
 
 // plugins/cursor/scripts/session-lifecycle-hook.mts
 var EVENTS = ["SessionStart", "SessionEnd"];
