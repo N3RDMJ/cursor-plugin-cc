@@ -195,6 +195,14 @@ export function appendJobLog(stateDir: string, jobId: string, text: string): voi
   fs.appendFileSync(getJobLogPath(stateDir, jobId), text, { mode: FILE_MODE });
 }
 
+export function jobLogMtimeMs(stateDir: string, jobId: string): number | undefined {
+  try {
+    return fs.statSync(getJobLogPath(stateDir, jobId)).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export function readJobLog(stateDir: string, jobId: string): string | undefined {
   try {
     return fs.readFileSync(getJobLogPath(stateDir, jobId), "utf8");
