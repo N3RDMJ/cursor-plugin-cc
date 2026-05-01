@@ -35,6 +35,7 @@ vi.mock("@cursor/sdk", async () => {
   };
 });
 
+import { setBackendForTesting } from "../../../plugins/cursor/scripts/lib/credentials.mjs";
 import {
   cancelRun,
   createAgent,
@@ -44,6 +45,7 @@ import {
   normalizeStreamStatus,
   oneShot,
   resolveApiKey,
+  resolveApiKeySync,
   resumeAgent,
   sendTask,
   toAgentEvents,
@@ -125,6 +127,7 @@ beforeEach(() => {
   savedModelEnv = process.env[USER_CONFIG_ENV_MODEL];
   process.env[STATE_ROOT_ENV] = stateRoot;
   delete process.env[USER_CONFIG_ENV_MODEL];
+  setBackendForTesting(null);
 });
 
 afterEach(() => {
@@ -135,25 +138,81 @@ afterEach(() => {
   else process.env[STATE_ROOT_ENV] = savedStateRoot;
   if (savedModelEnv === undefined) delete process.env[USER_CONFIG_ENV_MODEL];
   else process.env[USER_CONFIG_ENV_MODEL] = savedModelEnv;
+  setBackendForTesting(null);
 });
 
 describe("resolveApiKey", () => {
-  it("returns the explicit value when provided", () => {
-    expect(resolveApiKey("explicit")).toBe("explicit");
+  it("returns explicit value with source 'explicit'", async () => {
+    const result = await resolveApiKey("explicit-key");
+    expect(result).toEqual({ apiKey: "explicit-key", source: "explicit" });
   });
 
-  it("falls back to CURSOR_API_KEY", () => {
+  it("falls back to CURSOR_API_KEY with source 'env'", async () => {
     process.env.CURSOR_API_KEY = "from-env";
-    expect(resolveApiKey()).toBe("from-env");
+    const result = await resolveApiKey();
+    expect(result).toEqual({ apiKey: "from-env", source: "env" });
   });
 
-  it("throws ConfigurationError when neither is set", () => {
+  it("falls back to keychain when env is unset", async () => {
     delete process.env.CURSOR_API_KEY;
-    expect(() => resolveApiKey()).toThrow(/CURSOR_API_KEY/);
+    setBackendForTesting({
+      name: "test-keychain",
+      get: async () => "from-keychain",
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    const result = await resolveApiKey();
+    expect(result).toEqual({ apiKey: "from-keychain", source: "keychain" });
   });
 
-  it("treats whitespace-only keys as missing", () => {
-    expect(() => resolveApiKey("   ")).toThrow(/CURSOR_API_KEY/);
+  it("throws when no source is available", async () => {
+    delete process.env.CURSOR_API_KEY;
+    await expect(resolveApiKey()).rejects.toThrow(/No API key found/);
+  });
+
+  it("treats whitespace-only explicit values as missing", async () => {
+    delete process.env.CURSOR_API_KEY;
+    await expect(resolveApiKey("   ")).rejects.toThrow(/No API key found/);
+  });
+
+  it("prefers env over keychain", async () => {
+    process.env.CURSOR_API_KEY = "from-env";
+    setBackendForTesting({
+      name: "test-keychain",
+      get: async () => "from-keychain",
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    const result = await resolveApiKey();
+    expect(result.source).toBe("env");
+  });
+
+  it("prefers explicit over env and keychain", async () => {
+    process.env.CURSOR_API_KEY = "from-env";
+    setBackendForTesting({
+      name: "test-keychain",
+      get: async () => "from-keychain",
+      set: async () => undefined,
+      delete: async () => undefined,
+    });
+    const result = await resolveApiKey("explicit");
+    expect(result.source).toBe("explicit");
+  });
+});
+
+describe("resolveApiKeySync", () => {
+  it("returns explicit value", () => {
+    expect(resolveApiKeySync("explicit")).toBe("explicit");
+  });
+
+  it("falls back to env", () => {
+    process.env.CURSOR_API_KEY = "from-env";
+    expect(resolveApiKeySync()).toBe("from-env");
+  });
+
+  it("returns undefined when neither is set", () => {
+    delete process.env.CURSOR_API_KEY;
+    expect(resolveApiKeySync()).toBeUndefined();
   });
 });
 

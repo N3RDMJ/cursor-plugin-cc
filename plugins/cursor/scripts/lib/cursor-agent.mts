@@ -16,6 +16,12 @@ import {
   type SettingSource,
 } from "@cursor/sdk";
 
+import {
+  type KeySource,
+  type ResolvedKey,
+  resolveApiKeyFromKeychain,
+  setActiveKeychainSecret,
+} from "./credentials.mjs";
 import { detectCloudRepository } from "./git.mjs";
 import { type RetryOptions, withRetry } from "./retry.mjs";
 import { resolveDefaultModel } from "./user-config.mjs";
@@ -99,18 +105,47 @@ export interface RequestOptions {
 }
 
 /**
- * Resolve a Cursor API key from the supplied option or `CURSOR_API_KEY`.
- * Throws a ConfigurationError when neither is set so callers fail fast with
- * a clear message instead of a generic 401 from the SDK.
+ * Synchronous fast-path: resolve from explicit value or env var. Does not
+ * check the keychain — use `resolveApiKeyAsync` when the full chain is needed.
  */
-export function resolveApiKey(apiKey?: string): string {
+export function resolveApiKeySync(apiKey?: string): string | undefined {
   const resolved = apiKey ?? process.env.CURSOR_API_KEY;
-  if (!resolved || resolved.trim() === "") {
-    throw new ConfigurationError(
-      "CURSOR_API_KEY is not set. Export your Cursor API key or pass apiKey explicitly.",
-    );
+  if (resolved && resolved.trim() !== "") return resolved;
+  return undefined;
+}
+
+export interface ResolvedApiKey {
+  apiKey: string;
+  source: KeySource;
+}
+
+/**
+ * Resolve a Cursor API key: explicit → env → OS keychain → error.
+ * The keychain lookup is async (shells out to secret-tool / security).
+ * Stamps the keychain secret into the redaction registry when used.
+ */
+export async function resolveApiKey(apiKey?: string): Promise<ResolvedApiKey> {
+  if (apiKey && apiKey.trim() !== "") {
+    return { apiKey, source: "explicit" };
   }
-  return resolved;
+  const env = process.env.CURSOR_API_KEY;
+  if (env && env.trim() !== "") {
+    return { apiKey: env, source: "env" };
+  }
+  let keychainResult: ResolvedKey | undefined;
+  try {
+    keychainResult = await resolveApiKeyFromKeychain();
+  } catch {
+    /* keychain unavailable — fall through to error */
+  }
+  if (keychainResult) {
+    setActiveKeychainSecret(keychainResult.apiKey);
+    return { apiKey: keychainResult.apiKey, source: "keychain" };
+  }
+  throw new ConfigurationError(
+    "No API key found. Run /cursor:setup --login to store one in the OS keychain, " +
+      "or export CURSOR_API_KEY.",
+  );
 }
 
 /**
@@ -137,8 +172,8 @@ export function buildAgentOptionsFromFlags(
   return opts;
 }
 
-function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
-  const apiKey = resolveApiKey(opts.apiKey);
+async function buildAgentOptions(opts: CursorAgentOptions): Promise<AgentOptions> {
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   const model = opts.model ?? resolveDefaultModel(DEFAULT_MODEL).model;
   const mode: AgentMode = opts.mode ?? "local";
 
@@ -171,11 +206,11 @@ function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
 }
 
 export async function createAgent(opts: CursorAgentOptions): Promise<SDKAgent> {
-  return Agent.create(buildAgentOptions(opts));
+  return Agent.create(await buildAgentOptions(opts));
 }
 
 export async function resumeAgent(agentId: string, opts: CursorAgentOptions): Promise<SDKAgent> {
-  return Agent.resume(agentId, buildAgentOptions(opts));
+  return Agent.resume(agentId, await buildAgentOptions(opts));
 }
 
 export async function disposeAgent(agent: SDKAgent): Promise<void> {
@@ -288,12 +323,12 @@ export async function downloadArtifact(agent: SDKAgent, path: string): Promise<B
  * unchanged because the SDK marks them non-retryable.
  */
 export async function whoami(opts: RequestOptions = {}): Promise<SDKUser> {
-  const apiKey = resolveApiKey(opts.apiKey);
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   return withRetry(() => Cursor.me({ apiKey }), opts.retry);
 }
 
 export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]> {
-  const apiKey = resolveApiKey(opts.apiKey);
+  const { apiKey } = await resolveApiKey(opts.apiKey);
   return withRetry(() => Cursor.models.list({ apiKey }), opts.retry);
 }
 
