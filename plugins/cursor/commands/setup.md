@@ -1,25 +1,44 @@
 ---
 description: Validate the cursor-plugin-cc runtime — Node, API key, account, models. Manage credentials and the Stop review gate.
 argument-hint: '[--login|--logout] [--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
-allowed-tools: Bash(node:*), Bash(echo:*)
+allowed-tools: Bash(node:*), Bash(printf:*), Bash(rm:*)
 ---
 
 # /cursor:setup
 
 ## When `--login` is passed
 
-Do NOT run the CLI directly. Handle the login flow conversationally:
+Do NOT run the CLI directly. Present **two options** to the user:
 
-1. Ask the user: "Paste your Cursor API key (you can get one from your Cursor account settings). The key is only sent to the Cursor API for validation and then stored in your OS keychain — it is not logged or transmitted anywhere else."
-2. Once the user provides the key, validate and store it by running:
+### Option A — Secure hidden input (recommended)
 
-```bash
-echo "<THE_KEY>" | node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login
+Tell the user they can enter their key securely via hidden input by running
+this command in their Claude Code prompt. Present it ready to copy:
+
+```
+! node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login
 ```
 
-3. Report the result to the user. If it succeeded, tell them the key is stored in their OS keychain. If it failed, relay the error.
+The key never appears in the conversation — it is read as hidden terminal
+input, validated via `Cursor.me()`, and stored in the OS keychain.
 
-**Do not** echo the key back or include it in any output beyond the pipe command.
+### Option B — Paste in chat (convenient)
+
+If the user prefers, they can paste the key directly in the conversation.
+Warn them: "Note: the key will be visible in this conversation's transcript.
+It is sent to the Cursor API for validation and stored in your OS keychain."
+
+Once the user provides the key, write it to a temp file and pipe it to the
+CLI so it stays out of process arguments:
+
+```bash
+printf '%s' '<THE_KEY>' > /tmp/.cursor-key-$$ && node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login < /tmp/.cursor-key-$$ ; rm -f /tmp/.cursor-key-$$
+```
+
+Report the result to the user. If it succeeded, tell them the key is stored
+in their OS keychain. If it failed, relay the error.
+
+**Do not** echo the key back or include it in any output beyond the command.
 
 ## When `--logout` is passed
 
@@ -54,8 +73,9 @@ The plugin resolves the Cursor API key in this order:
 
 Manage the keychain credential via:
 
-- `--login` — conversational flow (see above). Validates via `Cursor.me()` and
-  stores in the OS keychain.
+- `--login` — two paths: hidden terminal input (secure, recommended) or
+  paste-in-chat (convenient). Both validate via `Cursor.me()` and store in
+  the OS keychain.
 - `--logout` — remove the stored key from the OS keychain.
 
 The setup output's "API key" row reports the active key source (`env`,
