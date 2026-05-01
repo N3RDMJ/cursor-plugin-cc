@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   getDiff,
   getRecentCommits,
   getRemoteUrl,
+  getSourceTree,
   getStatus,
   isDirty,
   normalizeGitHubRemote,
@@ -218,6 +219,81 @@ describe("resolveReviewTarget", () => {
 
   it("detectDefaultBranch returns 'main' for the conventional repo", () => {
     expect(detectDefaultBranch(repo)).toBe("main");
+  });
+});
+
+describe("getSourceTree", () => {
+  let repo: string;
+
+  beforeEach(() => {
+    repo = makeRepo();
+  });
+
+  afterEach(() => {
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("categorizes .mts source, tests, and bundle .mjs files", () => {
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    mkdirSync(path.join(repo, "src/bundle"), { recursive: true });
+    mkdirSync(path.join(repo, "tests"), { recursive: true });
+    writeFileSync(path.join(repo, "src/main.mts"), "export {};");
+    writeFileSync(path.join(repo, "src/util.mts"), "export {};");
+    writeFileSync(path.join(repo, "src/bundle/main.mjs"), "export {};");
+    writeFileSync(path.join(repo, "tests/main.test.mts"), "import 'vitest';");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+
+    const tree = getSourceTree(repo);
+    expect(tree).toContain("Source files (read these):");
+    expect(tree).toContain("src/main.mts");
+    expect(tree).toContain("src/util.mts");
+    expect(tree).toContain("Tests:");
+    expect(tree).toContain("tests/main.test.mts");
+    expect(tree).toContain("Compiled output (do not read");
+    expect(tree).toContain("src/bundle/main.mjs");
+  });
+
+  it("returns empty string for repos with no source or bundle files", () => {
+    writeFileSync(path.join(repo, "README.md"), "# hello");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+    expect(getSourceTree(repo)).toBe("");
+  });
+
+  it("excludes .d.ts and .d.mts declaration files from source", () => {
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(path.join(repo, "src/main.mts"), "export {};");
+    writeFileSync(path.join(repo, "src/main.d.mts"), "export {};");
+    writeFileSync(path.join(repo, "src/types.d.ts"), "export {};");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+
+    const tree = getSourceTree(repo);
+    expect(tree).toContain("src/main.mts");
+    expect(tree).not.toContain("main.d.mts");
+    expect(tree).not.toContain("types.d.ts");
+  });
+
+  it("ignores .mjs files outside bundle/dist/build directories", () => {
+    mkdirSync(path.join(repo, "src"), { recursive: true });
+    writeFileSync(path.join(repo, "src/main.mts"), "export {};");
+    writeFileSync(path.join(repo, "src/bootstrap.mjs"), "import('./main.mjs');");
+    git(repo, ["add", "."]);
+    git(repo, ["commit", "-q", "-m", "init"]);
+
+    const tree = getSourceTree(repo);
+    expect(tree).not.toContain("bootstrap.mjs");
+    expect(tree).not.toContain("Compiled output");
+  });
+
+  it("returns empty string in non-git directory", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "cursor-no-git-"));
+    try {
+      expect(getSourceTree(dir)).toBe("");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

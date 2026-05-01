@@ -11,7 +11,7 @@ import {
   createAgent,
   resumeAgent,
 } from "../lib/cursor-agent.mjs";
-import { getBranch, getRecentCommits } from "../lib/git.mjs";
+import { getBranch, getRecentCommits, getSourceTree } from "../lib/git.mjs";
 import { createJob, findRecentTaskAgents, markFailed } from "../lib/job-control.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
@@ -117,6 +117,11 @@ function buildContextHeader(workspaceRoot: string): string {
     for (const c of commits) {
       lines.push(`  ${c.hash.slice(0, 8)} ${c.subject}`);
     }
+  }
+  const sourceTree = getSourceTree(workspaceRoot);
+  if (sourceTree) {
+    lines.push("");
+    lines.push(sourceTree);
   }
   return lines.join("\n");
 }

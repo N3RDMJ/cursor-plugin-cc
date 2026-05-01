@@ -12,6 +12,8 @@ You operate in the configured workspace.
 </write_policy>
 
 <constraints>
+Read TypeScript source files (.mts/.ts), not compiled bundles (.mjs/.js). If the workspace context lists compiled output, ignore those files entirely.
+Start by listing files to understand the project structure before reading code.
 Make focused, well-scoped changes; preserve unrelated user work.
 Before changing files, understand the surrounding code.
 Keep progress updates concise — prefer tool calls over narration.
