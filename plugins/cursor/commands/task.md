@@ -23,10 +23,10 @@ Execution mode:
 - Otherwise, before starting Cursor, check for a resumable agent from this workspace by running:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --last --dry-run --json 2>/dev/null
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --list --json --limit 1 2>/dev/null
 ```
 
-- If that helper reports an available agent, use `AskUserQuestion` exactly once to ask whether to continue the current Cursor thread or start a new one.
+- If that command outputs a non-empty agent list (at least one agent ID), use `AskUserQuestion` exactly once to ask whether to continue the current Cursor thread or start a new one.
 - The two choices must be:
   - `Continue current Cursor thread`
   - `Start a new Cursor thread`

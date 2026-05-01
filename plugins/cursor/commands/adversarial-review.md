@@ -34,16 +34,15 @@ Execution mode rules:
   - `Run in background`
 
 Argument handling:
-- Preserve the user's arguments exactly.
-- Do not strip `--wait` or `--background` yourself.
+- `--wait` and `--background` are execution-mode flags for Claude Code, not for the companion script. Strip them from the arguments before invoking the companion. The companion does not accept these flags.
+- Preserve all other user arguments exactly (`--staged`, `--scope`, `--base`, `--model`, `--timeout`, `--json`, and any focus text).
 - Do not weaken the adversarial framing or rewrite the user's focus text.
-- The companion script parses `--wait` and `--background`, but Claude Code's `Bash(..., run_in_background: true)` is what actually detaches the run.
 - Unlike `/cursor:review`, it can take extra focus text after the flags.
 
 Foreground flow:
-- Run:
+- Strip `--wait` and `--background` from `$ARGUMENTS`, then run:
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" adversarial-review $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" adversarial-review <remaining-args>
 ```
 - Return the command stdout verbatim, exactly as-is.
 - Do not paraphrase, summarize, or add commentary before or after it.
@@ -53,7 +52,7 @@ Background flow:
 - Launch the review with `Bash` in the background:
 ```typescript
 Bash({
-  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" adversarial-review $ARGUMENTS`,
+  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" adversarial-review <remaining-args>`,
   description: "Cursor adversarial review",
   run_in_background: true
 })
