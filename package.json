@@ -26,5 +26,10 @@
   },
   "dependencies": {
     "@cursor/sdk": "^1.0.11"
+  },
+  "overrides": {
+    "undici": "^7.10.0",
+    "tar": "^7.5.11",
+    "http-proxy-agent": "^7.0.2"
   }
 }
