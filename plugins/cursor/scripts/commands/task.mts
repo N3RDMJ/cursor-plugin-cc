@@ -7,14 +7,13 @@ import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildAgentOptionsFromFlags,
-  buildPrompt,
   type CursorAgentOptions,
   createAgent,
   resumeAgent,
-  writePolicyText,
 } from "../lib/cursor-agent.mjs";
 import { getBranch, getRecentCommits } from "../lib/git.mjs";
 import { createJob, findRecentTaskAgents } from "../lib/job-control.mjs";
+import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -159,13 +158,16 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
 
-  // Skip local-workspace context in cloud mode: the cloud agent runs against
-  // `startingRef` of the remote, so local uncommitted state would mislead it.
-  const contextHeader = flags.cloud ? "" : buildContextHeader(workspaceRoot);
-  const sections = [contextHeader, writePolicyText(flags.write), flags.prompt].filter(
-    (s) => s.length > 0,
-  );
-  const fullPrompt = buildPrompt(sections.join("\n\n"));
+  const workspaceContext = flags.cloud ? "" : buildContextHeader(workspaceRoot);
+  const writePolicy = flags.write
+    ? "You may modify files in the workspace."
+    : "Do NOT modify files. Read and analyze only.";
+  const template = loadPromptTemplate("task");
+  const fullPrompt = interpolateTemplate(template, {
+    USER_PROMPT: flags.prompt,
+    WRITE_POLICY: writePolicy,
+    WORKSPACE_CONTEXT: workspaceContext || "(no local context — cloud mode)",
+  });
 
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
 

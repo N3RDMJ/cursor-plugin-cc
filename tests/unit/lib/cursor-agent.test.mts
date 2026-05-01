@@ -36,10 +36,8 @@ vi.mock("@cursor/sdk", async () => {
 });
 
 import {
-  buildPrompt,
   cancelRun,
   createAgent,
-  DEFAULT_AGENT_INSTRUCTIONS,
   DEFAULT_MODEL,
   disposeAgent,
   listModels,
@@ -552,18 +550,6 @@ describe("Cursor account helpers", () => {
   it("validateModel throws ConfigurationError for an unknown model", async () => {
     sdkMocks.modelsList.mockResolvedValue([{ id: "composer-2", displayName: "Composer 2" }]);
     await expect(validateModel({ id: "imaginary" })).rejects.toThrow(/imaginary/);
-  });
-});
-
-describe("buildPrompt", () => {
-  it("wraps a user prompt with the default instructions", () => {
-    const out = buildPrompt("ship it");
-    expect(out.startsWith(DEFAULT_AGENT_INSTRUCTIONS)).toBe(true);
-    expect(out.endsWith("User task:\nship it")).toBe(true);
-  });
-
-  it("honors a custom instructions override", () => {
-    expect(buildPrompt("hi", "custom rules")).toBe("custom rules\n\nUser task:\nhi");
   });
 });
 

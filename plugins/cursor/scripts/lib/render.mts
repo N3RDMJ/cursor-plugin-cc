@@ -100,6 +100,8 @@ export function summarizeToolArgs(toolName: string, args: unknown): string | und
 export interface RenderEventOptions {
   /** Suppress non-error status events to keep stderr quiet. Default false. */
   quietStatus?: boolean;
+  /** Suppress thinking token events (word-by-word noise). Default false. */
+  quietThinking?: boolean;
 }
 
 export interface RenderedEvent {
@@ -129,6 +131,7 @@ export function renderStreamEvent(
     case "assistant_text":
       return { stdout: event.text };
     case "thinking": {
+      if (options.quietThinking) return {};
       const t = compactText(event.text);
       return t ? { stderr: `[thinking] ${t}\n` } : {};
     }

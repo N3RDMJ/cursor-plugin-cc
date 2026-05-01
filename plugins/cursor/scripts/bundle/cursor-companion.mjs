@@ -4,7 +4,6 @@ import {
   ageFromIso,
   bool,
   buildAgentOptionsFromFlags,
-  buildPrompt,
   cancelJob,
   clearDefaultModel,
   compactText,
@@ -15,9 +14,11 @@ import {
   getBranch,
   getJob,
   getRecentCommits,
+  interpolateTemplate,
   listJobs,
   listModels,
   listRemoteAgents,
+  loadPromptTemplate,
   logJobLine,
   markFailed,
   markFinished,
@@ -39,9 +40,8 @@ import {
   toAgentEvents,
   unregisterActiveRun,
   validateModel,
-  whoami,
-  writePolicyText
-} from "./chunk-AUSOW76U.mjs";
+  whoami
+} from "./chunk-CRD23GWL.mjs";
 import {
   ensureStateDir,
   readJobLog,
@@ -153,7 +153,7 @@ async function runAgentTaskForeground(opts) {
       },
       onEvent: (event) => {
         for (const ae of toAgentEvents(event)) {
-          const rendered = renderStreamEvent(ae, { quietStatus: true });
+          const rendered = renderStreamEvent(ae, { quietStatus: true, quietThinking: true });
           if (rendered.stdout) io.stdout.write(rendered.stdout);
           if (rendered.stderr) {
             io.stderr.write(rendered.stderr);
@@ -405,9 +405,13 @@ async function runResume(args, io) {
   } else {
     agentId = flags.target.agentId;
   }
-  const fullPrompt = buildPrompt(`${writePolicyText(flags.write)}
-
-${flags.prompt}`);
+  const writePolicy = flags.write ? "You may modify files in the workspace." : "Do NOT modify files. Read and analyze only.";
+  const template = loadPromptTemplate("task");
+  const fullPrompt = interpolateTemplate(template, {
+    USER_PROMPT: flags.prompt,
+    WRITE_POLICY: writePolicy,
+    WORKSPACE_CONTEXT: "(resumed agent \u2014 prior context preserved)"
+  });
   const job = createJob(stateDir, {
     type: "task",
     prompt: flags.prompt,
@@ -903,11 +907,14 @@ async function runTask(args, io) {
   }
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
-  const contextHeader = flags.cloud ? "" : buildContextHeader(workspaceRoot);
-  const sections = [contextHeader, writePolicyText(flags.write), flags.prompt].filter(
-    (s) => s.length > 0
-  );
-  const fullPrompt = buildPrompt(sections.join("\n\n"));
+  const workspaceContext = flags.cloud ? "" : buildContextHeader(workspaceRoot);
+  const writePolicy = flags.write ? "You may modify files in the workspace." : "Do NOT modify files. Read and analyze only.";
+  const template = loadPromptTemplate("task");
+  const fullPrompt = interpolateTemplate(template, {
+    USER_PROMPT: flags.prompt,
+    WRITE_POLICY: writePolicy,
+    WORKSPACE_CONTEXT: workspaceContext || "(no local context \u2014 cloud mode)"
+  });
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
   const agentOpts = buildAgentOptionsFromFlags(workspaceRoot, flags);
   const agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);

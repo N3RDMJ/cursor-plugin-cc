@@ -308,25 +308,6 @@ function resolveApiKey(apiKey) {
   }
   return resolved;
 }
-var DEFAULT_AGENT_INSTRUCTIONS = [
-  "You are a coding agent invoked by Claude Code via the cursor-plugin-cc plugin.",
-  "Operate in the configured workspace.",
-  "Make focused, well-scoped changes; preserve unrelated user work.",
-  "Before changing files, understand the surrounding code.",
-  "Keep progress updates concise and summarize the result clearly at the end."
-].join("\n");
-var WRITE_POLICY = "You may modify files in the workspace.";
-var READ_ONLY_POLICY = "Do NOT modify files. Read and analyze only \u2014 produce diffs/suggestions in your response, but do not write to disk.";
-function writePolicyText(write) {
-  return write ? WRITE_POLICY : READ_ONLY_POLICY;
-}
-function buildPrompt(prompt, instructions) {
-  const sys = instructions ?? DEFAULT_AGENT_INSTRUCTIONS;
-  return `${sys}
-
-User task:
-${prompt}`;
-}
 function buildAgentOptionsFromFlags(workspaceRoot, flags) {
   const opts = { cwd: workspaceRoot };
   if (flags.model) opts.model = flags.model;
@@ -553,6 +534,22 @@ function ingestEvent(event, textParts, toolCalls) {
   }
 }
 
+// plugins/cursor/scripts/lib/prompts.mts
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+var PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "prompts");
+function loadPromptTemplate(name) {
+  const promptPath = join(PROMPTS_DIR, `${name}.md`);
+  return readFileSync(promptPath, "utf8");
+}
+function interpolateTemplate(template, variables) {
+  return template.replace(
+    /\{\{([A-Z_]+)\}\}/g,
+    (_, key) => Object.hasOwn(variables, key) ? variables[key] ?? "" : ""
+  );
+}
+
 // plugins/cursor/scripts/lib/redact.mts
 var PLACEHOLDER = "[REDACTED]";
 var MIN_KEY_LENGTH = 8;
@@ -649,6 +646,7 @@ function renderStreamEvent(event, options = {}) {
     case "assistant_text":
       return { stdout: event.text };
     case "thinking": {
+      if (options.quietThinking) return {};
       const t = compactText(event.text);
       return t ? { stderr: `[thinking] ${t}
 ` } : {};
@@ -978,22 +976,6 @@ flags:
   --help, -h
 `;
 var VALID_SCOPES = /* @__PURE__ */ new Set(["auto", "working-tree", "branch"]);
-var REVIEW_INSTRUCTIONS = [
-  "You are a senior code reviewer doing a focused review of a small change.",
-  "Be precise and concrete. Cite the exact file:line that triggers each finding.",
-  "Distinguish severity: critical (likely to break prod), high (clear bug or security issue),",
-  "  medium (correctness/design concern), low (style/nit).",
-  "Confidence is 0.0\u20131.0; be honest, do not bluff at 1.0.",
-  "Output ONLY a single JSON object matching the schema below \u2014 no prose, no markdown fences."
-].join("\n");
-var ADVERSARIAL_INSTRUCTIONS = [
-  "You are an adversarial reviewer. Your job is to challenge design choices,",
-  "  not just hunt for defects. Push back on premature abstractions, hidden coupling,",
-  "  unnecessary state, brittle assumptions, and missing edge cases.",
-  "Be precise: cite file:line for each finding. Don't manufacture issues \u2014 if the",
-  "  change is genuinely simple and correct, say so and approve.",
-  "Output ONLY a single JSON object matching the schema below \u2014 no prose, no markdown fences."
-].join("\n");
 var SCHEMA = `{
   "verdict": "approve" | "needs-attention",
   "summary": string,
@@ -1053,22 +1035,16 @@ function parseFlags(args) {
   }
   return flags;
 }
-function buildReviewPrompt(input) {
-  const sections = [
-    input.instructions,
-    "",
-    "Output schema:",
+function buildReviewPrompt(opts) {
+  const templateName = opts.adversarial ? "adversarial-review" : "review";
+  const focusSection = opts.focus ? `Reviewer focus (priority axis): ${opts.focus}` : "";
+  return interpolateTemplate(loadPromptTemplate(templateName), {
+    TARGET_LABEL: opts.targetLabel,
+    FOCUS_SECTION: focusSection,
     SCHEMA,
-    "",
-    `Review target: ${input.targetLabel}`,
-    ""
-  ];
-  if (input.focus) {
-    sections.push("Reviewer focus (priority axis):", input.focus, "");
-  }
-  sections.push("Working-tree status:", input.status || "(clean)", "");
-  sections.push("Diff to review:", input.diff);
-  return sections.join("\n");
+    STATUS: opts.status || "(clean)",
+    DIFF: opts.diff
+  });
 }
 function extractJson(raw) {
   const trimmed = raw.trim();
@@ -1133,13 +1109,12 @@ async function runReview(args, io, options) {
     io.stderr.write("nothing to review (empty diff)\n");
     return 0;
   }
-  const instructions = options.adversarial ? ADVERSARIAL_INSTRUCTIONS : REVIEW_INSTRUCTIONS;
   const prompt = buildReviewPrompt({
     diff,
     status: getStatus(workspaceRoot),
-    instructions,
     targetLabel,
-    focus: flags.focus
+    focus: flags.focus,
+    adversarial: Boolean(options.adversarial)
   });
   const job = createJob(stateDir, {
     type: options.adversarial ? "adversarial-review" : "review",
@@ -1229,8 +1204,6 @@ export {
   resolveDefaultModel,
   DEFAULT_MODEL,
   resolveApiKey,
-  writePolicyText,
-  buildPrompt,
   buildAgentOptionsFromFlags,
   createAgent,
   resumeAgent,
@@ -1253,6 +1226,8 @@ export {
   unregisterActiveRun,
   cancelJob,
   logJobLine,
+  loadPromptTemplate,
+  interpolateTemplate,
   compactText,
   renderStreamEvent,
   ageFromIso,
