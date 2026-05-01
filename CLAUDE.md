@@ -103,11 +103,3 @@ The wrapper in `lib/cursor-agent.mts` normalizes these.
 - Job state persisted to `~/.claude/cursor-plugin/state.json` with per-job `.json` and `.log` files
 - Never suppress type errors (`as any`, `@ts-ignore`, `@ts-expect-error`)
 
-## Plan Tracking
-
-`PLAN.md` is the source of truth for outstanding work. Whenever a checklist item in `PLAN.md` is implemented, **update the checkbox in the same change** that lands the work:
-
-- Tick the box: `- [ ]` → `- [x]`
-- If a bullet is superseded or no longer applies, strike it through with `~~...~~` and append a short note explaining the replacement (don't silently delete it).
-- If you finish work that isn't in `PLAN.md`, add it as a checked item under the relevant phase rather than leaving the plan stale.
-- Keep PLAN.md edits in the same commit as the implementation so the plan never drifts from the codebase.
