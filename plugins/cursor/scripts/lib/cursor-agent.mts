@@ -18,6 +18,7 @@ import {
 
 import { detectCloudRepository } from "./git.mjs";
 import { type RetryOptions, withRetry } from "./retry.mjs";
+import { resolveDefaultModel } from "./user-config.mjs";
 
 export const DEFAULT_MODEL: ModelSelection = { id: "composer-2" };
 
@@ -170,7 +171,7 @@ export function buildAgentOptionsFromFlags(
 
 function buildAgentOptions(opts: CursorAgentOptions): AgentOptions {
   const apiKey = resolveApiKey(opts.apiKey);
-  const model = opts.model ?? DEFAULT_MODEL;
+  const model = opts.model ?? resolveDefaultModel(DEFAULT_MODEL).model;
   const mode: AgentMode = opts.mode ?? "local";
 
   const base: AgentOptions = {

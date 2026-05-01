@@ -761,6 +761,40 @@ to cover the new flags; typecheck + lint stay green.
 
 ---
 
+## Phase 10: Persistent default model selection
+
+Per-invocation `--model <id>` already worked everywhere, but every run that
+omits the flag fell back to the hardcoded `composer-2`. Phase 10 adds a
+user-wide persisted default so users who want a different model don't have
+to pass `--model` on every command.
+
+- [x] `lib/user-config.mts` — `UserConfig` (`{ version: 1, defaultModel? }`)
+      persisted as `<state-root>/config.json` (sibling of per-workspace dirs).
+      Exposes `readUserConfig`/`writeUserConfig`/`setDefaultModel`/
+      `clearDefaultModel` plus `resolveDefaultModel(fallback)` returning
+      `{ model, source }` where `source ∈ "flag" | "env" | "config" | "fallback"`.
+- [x] `lib/cursor-agent.mts` `buildAgentOptions` calls `resolveDefaultModel`
+      so `createAgent`/`resumeAgent`/`oneShot` honor (in order):
+      explicit `--model` → `CURSOR_MODEL` env → persisted config → built-in
+      `composer-2` fallback.
+- [x] `commands/setup.mts` accepts `--set-model <id>` (validates against
+      `Cursor.models.list()` before writing) and `--clear-model`. Mutually
+      exclusive; empty `--set-model` value is a UsageError. Setup report adds
+      a `Default` row plus `defaultModel: { id, source }` in `--json`.
+- [x] `commands/setup.md` documents the resolution order and the new flags.
+- [x] Tests: `tests/unit/lib/user-config.test.mts` (round-trip, malformed
+      config, resolution priority including override and whitespace env),
+      `tests/cli/setup.test.mts` (built-in row text, `--set-model` happy
+      path, unknown id rejected, `--clear-model`, mutual exclusion, env
+      wins over config), and `tests/unit/lib/cursor-agent.test.mts` covers
+      env / persisted-config paths through `createAgent`.
+
+**Exit criteria**: 285 unit/CLI tests pass, lint+typecheck stay green, and
+`/cursor:setup --set-model <id>` followed by `/cursor:task "..."` runs the
+selected model with no per-invocation flag.
+
+---
+
 ## Implementation Order
 
 ```
@@ -773,6 +807,7 @@ Phase 6 (review gate)     ██████████  ~2 hours (v2)
 Phase 7 (polish/publish)  ██████████  ~3 hours
 Phase 8 (resume command)  ██████████  ~1 hour
 Phase 9 (codex parity)    ██████████  ~2 hours
+Phase 10 (model default)  ██████████  ~1 hour
 ```
 
 Phases 1–4 are the critical path. Phase 5 runs alongside 3–4 (write tests as you build). Phase 6 is a clean follow-up. Phase 7 is final polish.
@@ -788,4 +823,4 @@ Phases 1–4 are the critical path. Phase 5 runs alongside 3–4 (write tests as
 | Job persistence | Filesystem JSON | Matches codex plugin pattern; no DB dependency; human-readable |
 | Broker pattern | Skip for v1 | SDK handles concurrency internally; add if we hit issues |
 | Review gate | v2 (opt-in) | Core delegation must work first; gate adds complexity |
-| Model default | `composer-2` | Best available Cursor model; overridable per-command |
+| Model default | `composer-2` (built-in fallback) | Best available Cursor model; overridable per-command via `--model`, per-shell via `CURSOR_MODEL`, or persisted user-wide via `/cursor:setup --set-model <id>` |
