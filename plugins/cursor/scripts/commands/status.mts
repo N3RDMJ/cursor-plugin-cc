@@ -2,7 +2,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
-import { getJob, type ListJobsFilter, listJobs } from "../lib/job-control.mjs";
+import { getJob, type ListJobsFilter, listJobs, reconcileStaleJobs } from "../lib/job-control.mjs";
 import { renderJobTable } from "../lib/render.mjs";
 import { type JobStatus, type JobType, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -64,6 +64,8 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
   const wait = bool(parsed, "wait");
   const timeoutMs = parsePositiveMs(parsed, "timeout-ms");
   const pollMs = parsePositiveMs(parsed, "poll-ms");
+
+  reconcileStaleJobs(stateDir);
 
   const jobId = parsed.positionals[0];
   if (jobId) {

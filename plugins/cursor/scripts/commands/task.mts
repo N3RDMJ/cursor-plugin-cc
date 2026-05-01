@@ -14,7 +14,7 @@ import {
   writePolicyText,
 } from "../lib/cursor-agent.mjs";
 import { getBranch, getRecentCommits } from "../lib/git.mjs";
-import { createJob, findRecentTaskAgents } from "../lib/job-control.mjs";
+import { createJob, findRecentTaskAgents, markFailed } from "../lib/job-control.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -170,7 +170,13 @@ export async function runTask(args: readonly string[], io: CommandIO): Promise<E
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
 
   const agentOpts = buildAgentOptionsFromFlags(workspaceRoot, flags);
-  const agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);
+  let agent: SDKAgent;
+  try {
+    agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);
+  } catch (err) {
+    markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
   const runFlags = { timeoutMs: flags.timeoutMs, force: flags.force, json: flags.json };
 
   if (flags.background) {

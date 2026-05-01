@@ -10,12 +10,17 @@ import {
   type JobRecord,
   type JobStatus,
   type JobType,
+  jobLogMtimeMs,
   pruneJobIndex,
   readJob,
   readStateIndex,
   writeJob,
   writeStateIndex,
 } from "./state.mjs";
+
+const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed", "cancelled"]);
+
+const STALE_JOB_TTL_MS = 30 * 60 * 1000;
 
 const JOB_ID_BYTES = 6; // 12 hex chars — short, collision-resistant enough for ~50 retained jobs
 
@@ -57,6 +62,8 @@ function indexEntry(record: JobRecord): JobIndexEntry {
   return entry;
 }
 
+// Note: read-modify-write with no file lock. Concurrent CLI processes can lose
+// index updates. Acceptable for single-user CLI; documented as known limitation.
 function upsertIndex(stateDir: string, record: JobRecord): void {
   const idx: JobIndex = readStateIndex(stateDir);
   const entry = indexEntry(record);
@@ -173,6 +180,11 @@ function update(stateDir: string, jobId: string, input: UpdateInput): JobRecord 
   if (!existing) {
     throw new Error(`job not found: ${jobId}`);
   }
+  // Once a job reaches a terminal state, no further updates are allowed.
+  // Prevents races where a background IIFE overwrites a cross-process cancel.
+  if (TERMINAL_STATUSES.has(existing.status)) {
+    return existing;
+  }
   const next: JobRecord = {
     ...existing,
     ...input,
@@ -181,6 +193,9 @@ function update(stateDir: string, jobId: string, input: UpdateInput): JobRecord 
       : existing.metadata,
     updatedAt: nowIso(),
   };
+  // Note: writeJob + upsertIndex are two separate atomic writes. A crash
+  // between them can leave job JSON and index disagreeing. Acceptable for
+  // single-user CLI; the index can be rebuilt from per-job files if needed.
   writeJob(stateDir, next);
   upsertIndex(stateDir, next);
   return next;
@@ -327,6 +342,33 @@ export function logJobLine(stateDir: string, jobId: string, line: string): void 
   const scrubbed = redactApiKey(line);
   const text = scrubbed.endsWith("\n") ? scrubbed : `${scrubbed}\n`;
   appendJobLog(stateDir, jobId, text);
+}
+
+/**
+ * Mark stale `pending` / `running` jobs as failed. A job is stale when its
+ * `updatedAt` timestamp exceeds `ttlMs` — the owning process likely exited
+ * before persisting a terminal state (SIGKILL, crash, explicit process.exit).
+ */
+export function reconcileStaleJobs(stateDir: string, ttlMs: number = STALE_JOB_TTL_MS): string[] {
+  const idx = readStateIndex(stateDir);
+  const now = Date.now();
+  const reconciled: string[] = [];
+  for (const entry of idx.jobs) {
+    if (TERMINAL_STATUSES.has(entry.status)) continue;
+    if (activeRuns.has(entry.id)) continue;
+    const age = now - new Date(entry.updatedAt).getTime();
+    if (age < ttlMs) continue;
+    // For running jobs, the log file's mtime is a better liveness signal than
+    // updatedAt — active runs append streaming events without touching the job
+    // record. Only reconcile when the log is also stale (or absent).
+    if (entry.status === "running") {
+      const logMtime = jobLogMtimeMs(stateDir, entry.id);
+      if (logMtime !== undefined && now - logMtime < ttlMs) continue;
+    }
+    markFailed(stateDir, entry.id, `stale: no update for ${Math.round(age / 60000)} minutes`);
+    reconciled.push(entry.id);
+  }
+  return reconciled;
 }
 
 /**
