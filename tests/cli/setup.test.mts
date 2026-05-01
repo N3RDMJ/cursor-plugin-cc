@@ -21,6 +21,7 @@ vi.mock("@cursor/sdk", async () => {
 });
 
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
+import { setBackendForTesting } from "@plugin/lib/credentials.mjs";
 import { readGateConfig } from "@plugin/lib/gate.mjs";
 import { resolveStateDir } from "@plugin/lib/state.mjs";
 import { readUserConfig, USER_CONFIG_ENV_MODEL } from "@plugin/lib/user-config.mjs";
@@ -37,6 +38,7 @@ beforeEach(() => {
   process.env.CURSOR_API_KEY = "test-key";
   savedModelEnv = process.env[USER_CONFIG_ENV_MODEL];
   delete process.env[USER_CONFIG_ENV_MODEL];
+  setBackendForTesting(null);
   vi.clearAllMocks();
   sdkMocks.cursorMe.mockResolvedValue({ apiKeyName: "test-key", userId: "u" });
   sdkMocks.modelsList.mockResolvedValue([
@@ -52,6 +54,7 @@ afterEach(() => {
   delete process.env.CURSOR_API_KEY;
   if (savedModelEnv === undefined) delete process.env[USER_CONFIG_ENV_MODEL];
   else process.env[USER_CONFIG_ENV_MODEL] = savedModelEnv;
+  setBackendForTesting(null);
 });
 
 describe("CLI: setup", () => {
@@ -143,5 +146,39 @@ describe("CLI: setup", () => {
     const out = io.captured.stdout.join("");
     expect(out).toContain("Default     composer-2");
     expect(out).toContain("from CURSOR_MODEL env");
+  });
+
+  it("reports apiKey source as 'env' when using CURSOR_API_KEY", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup"), io)).toBe(0);
+    expect(io.captured.stdout.join("")).toContain("(source: env)");
+  });
+
+  it("--json report includes apiKey.source", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--json"), io)).toBe(0);
+    const report = JSON.parse(io.captured.stdout.join(""));
+    expect(report.apiKey.source).toBe("env");
+  });
+
+  it("rejects --login together with --logout", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--login", "--logout"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("mutually exclusive");
+  });
+
+  it("--logout fails gracefully when no backend", async () => {
+    setBackendForTesting(null);
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--logout"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("No supported keychain backend");
+  });
+
+  it("--logout --json returns structured error when no backend", async () => {
+    setBackendForTesting(null);
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--logout", "--json"), io)).toBe(1);
+    const parsed = JSON.parse(io.captured.stdout.join(""));
+    expect(parsed.ok).toBe(false);
   });
 });

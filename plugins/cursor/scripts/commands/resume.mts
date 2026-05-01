@@ -4,11 +4,9 @@ import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildAgentOptionsFromFlags,
-  buildPrompt,
   listRemoteAgents,
   type RemoteAgentRow,
   resumeAgent,
-  writePolicyText,
 } from "../lib/cursor-agent.mjs";
 import {
   createJob,
@@ -16,6 +14,7 @@ import {
   markFailed,
   type RecentTaskAgent,
 } from "../lib/job-control.mjs";
+import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { ageFromIso, compactText } from "../lib/render.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -258,7 +257,15 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
     agentId = flags.target.agentId;
   }
 
-  const fullPrompt = buildPrompt(`${writePolicyText(flags.write)}\n\n${flags.prompt}`);
+  const writePolicy = flags.write
+    ? "You may modify files in the workspace."
+    : "Do NOT modify files. Read and analyze only.";
+  const template = loadPromptTemplate("task");
+  const fullPrompt = interpolateTemplate(template, {
+    USER_PROMPT: flags.prompt,
+    WRITE_POLICY: writePolicy,
+    WORKSPACE_CONTEXT: "(resumed agent — prior context preserved)",
+  });
 
   const job = createJob(stateDir, {
     type: "task",

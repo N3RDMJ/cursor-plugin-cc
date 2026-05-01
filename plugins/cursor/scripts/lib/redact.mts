@@ -6,6 +6,8 @@
  * surfacing in `~/.claude/cursor-plugin/<workspace>/<job>.log`.
  */
 
+import { getActiveKeychainSecret } from "./credentials.mjs";
+
 const PLACEHOLDER = "[REDACTED]";
 const MIN_KEY_LENGTH = 8;
 
@@ -24,7 +26,9 @@ export function redactSecret(text: string, secret: string | undefined): string {
  * call when the env var is unset — returns the input unchanged.
  */
 export function redactApiKey(text: string): string {
-  return redactSecret(text, process.env.CURSOR_API_KEY);
+  let result = redactSecret(text, process.env.CURSOR_API_KEY);
+  result = redactSecret(result, getActiveKeychainSecret());
+  return result;
 }
 
 /**

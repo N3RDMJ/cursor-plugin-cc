@@ -5,6 +5,7 @@ import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
 import { getDiff, getStatus, type ReviewScope, resolveReviewTarget } from "../lib/git.mjs";
 import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
+import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { type ReviewOutput, renderReviewResult } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
@@ -31,24 +32,6 @@ flags:
 `;
 
 const VALID_SCOPES = new Set<ReviewScope>(["auto", "working-tree", "branch"]);
-
-const REVIEW_INSTRUCTIONS = [
-  "You are a senior code reviewer doing a focused review of a small change.",
-  "Be precise and concrete. Cite the exact file:line that triggers each finding.",
-  "Distinguish severity: critical (likely to break prod), high (clear bug or security issue),",
-  "  medium (correctness/design concern), low (style/nit).",
-  "Confidence is 0.0–1.0; be honest, do not bluff at 1.0.",
-  "Output ONLY a single JSON object matching the schema below — no prose, no markdown fences.",
-].join("\n");
-
-const ADVERSARIAL_INSTRUCTIONS = [
-  "You are an adversarial reviewer. Your job is to challenge design choices,",
-  "  not just hunt for defects. Push back on premature abstractions, hidden coupling,",
-  "  unnecessary state, brittle assumptions, and missing edge cases.",
-  "Be precise: cite file:line for each finding. Don't manufacture issues — if the",
-  "  change is genuinely simple and correct, say so and approve.",
-  "Output ONLY a single JSON object matching the schema below — no prose, no markdown fences.",
-].join("\n");
 
 const SCHEMA = `{
   "verdict": "approve" | "needs-attention",
@@ -121,30 +104,22 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   return flags;
 }
 
-interface ReviewPromptInput {
+function buildReviewPrompt(opts: {
   diff: string;
   status: string;
-  instructions: string;
   targetLabel: string;
   focus: string;
-}
-
-function buildReviewPrompt(input: ReviewPromptInput): string {
-  const sections: string[] = [
-    input.instructions,
-    "",
-    "Output schema:",
+  adversarial: boolean;
+}): string {
+  const templateName = opts.adversarial ? "adversarial-review" : "review";
+  const focusSection = opts.focus ? `Reviewer focus (priority axis): ${opts.focus}` : "";
+  return interpolateTemplate(loadPromptTemplate(templateName), {
+    TARGET_LABEL: opts.targetLabel,
+    FOCUS_SECTION: focusSection,
     SCHEMA,
-    "",
-    `Review target: ${input.targetLabel}`,
-    "",
-  ];
-  if (input.focus) {
-    sections.push("Reviewer focus (priority axis):", input.focus, "");
-  }
-  sections.push("Working-tree status:", input.status || "(clean)", "");
-  sections.push("Diff to review:", input.diff);
-  return sections.join("\n");
+    STATUS: opts.status || "(clean)",
+    DIFF: opts.diff,
+  });
 }
 
 /**
@@ -228,13 +203,12 @@ export async function runReview(
     return 0;
   }
 
-  const instructions = options.adversarial ? ADVERSARIAL_INSTRUCTIONS : REVIEW_INSTRUCTIONS;
   const prompt = buildReviewPrompt({
     diff,
     status: getStatus(workspaceRoot),
-    instructions,
     targetLabel,
     focus: flags.focus,
+    adversarial: Boolean(options.adversarial),
   });
 
   const job = createJob(stateDir, {

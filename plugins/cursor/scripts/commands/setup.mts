@@ -2,6 +2,7 @@ import type { ModelSelection, SDKModel } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
+import { deleteApiKey, detectBackend, type KeySource, storeApiKey } from "../lib/credentials.mjs";
 import {
   DEFAULT_MODEL,
   listModels,
@@ -31,9 +32,15 @@ const HELP = `cursor-companion setup [flags]
 
 Validates the plugin runtime:
   - Node.js >= ${NODE_MIN_MAJOR}
-  - CURSOR_API_KEY is set
+  - API key is available (env or keychain)
   - Cursor.me() succeeds (key is valid)
   - Cursor.models.list() returns at least one model
+
+Credential management:
+  --login              Store a Cursor API key in the OS keychain.
+                       Reads from stdin (pipe or interactive hidden input).
+                       Validates via Cursor.me() before storing.
+  --logout             Remove the stored key from the OS keychain.
 
 Stop review gate (per workspace, opt-in):
   --enable-gate        Turn on the Stop review gate for this workspace
@@ -56,10 +63,6 @@ function nodeMajor(): number {
   return m ? Number(m[1]) : 0;
 }
 
-/**
- * Flatten the SDK model catalog into selectable variants. Mirrors the cookbook
- * `modelToChoices` shape (one row per concrete `ModelSelection`).
- */
 export function modelChoices(models: Awaited<ReturnType<typeof listModels>>): ModelChoice[] {
   const choices: ModelChoice[] = [];
   const seen = new Set<string>();
@@ -101,7 +104,7 @@ export function modelChoices(models: Awaited<ReturnType<typeof listModels>>): Mo
 
 interface SetupReport {
   node: { ok: boolean; version: string };
-  apiKey: { ok: boolean; error?: string };
+  apiKey: { ok: boolean; source?: KeySource; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
   models: { ok: boolean; choices: ModelChoice[]; error?: string };
   defaultModel: { id: string; source: DefaultModelSource };
@@ -111,7 +114,6 @@ interface SetupReport {
 interface BuildReportInput {
   workspaceRoot: string;
   gateEnabled: boolean;
-  /** Catalog already fetched by the caller — skips the duplicate list call. */
   prefetchedCatalog?: SDKModel[];
 }
 
@@ -131,8 +133,9 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
   };
 
   try {
-    resolveApiKey();
+    const { source } = await resolveApiKey();
     report.apiKey.ok = true;
+    report.apiKey.source = source;
   } catch (err) {
     report.apiKey.error = errorMessage(err);
     return report;
@@ -164,10 +167,12 @@ function renderReport(report: SetupReport): string {
   const lines: string[] = [];
   const yes = (ok: boolean): string => (ok ? "ok" : "fail");
   lines.push(`Node.js     ${yes(report.node.ok)}  (${report.node.version})`);
-  lines.push(
-    `API key     ${yes(report.apiKey.ok)}` +
-      (report.apiKey.error ? `  ${report.apiKey.error}` : ""),
-  );
+  const keyDetail = report.apiKey.ok
+    ? `  (source: ${report.apiKey.source})`
+    : report.apiKey.error
+      ? `  ${report.apiKey.error}`
+      : "";
+  lines.push(`API key     ${yes(report.apiKey.ok)}${keyDetail}`);
   if (report.account.ok) {
     lines.push(`Account     ok    (key: ${report.account.apiKeyName ?? "?"})`);
   } else if (report.account.error) {
@@ -201,11 +206,126 @@ function describeSource(source: DefaultModelSource): string {
   }
 }
 
+async function readHiddenInput(io: CommandIO): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const stdin = process.stdin;
+    if (!stdin.isTTY) {
+      let data = "";
+      stdin.setEncoding("utf8");
+      stdin.on("data", (chunk: string) => {
+        data += chunk;
+      });
+      stdin.on("end", () => resolve(data.trim()));
+      stdin.on("error", reject);
+      stdin.resume();
+      return;
+    }
+    io.stderr.write("Enter Cursor API key: ");
+    const prev = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.resume();
+    let buf = "";
+    const onData = (ch: string) => {
+      if (ch === "\n" || ch === "\r" || ch === "") {
+        stdin.setRawMode(prev);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        io.stderr.write("\n");
+        resolve(buf.trim());
+      } else if (ch === "") {
+        stdin.setRawMode(prev);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        reject(new Error("Aborted"));
+      } else if (ch === "" || ch === "\b") {
+        buf = buf.slice(0, -1);
+      } else {
+        buf += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+async function runLogin(io: CommandIO, json: boolean): Promise<ExitCode> {
+  const backend = detectBackend();
+  if (!backend) {
+    const msg = "No supported keychain backend on this platform. Use CURSOR_API_KEY env instead.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
+    } else {
+      io.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  const key = await readHiddenInput(io);
+  if (!key) {
+    const msg = "No key provided.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
+    } else {
+      io.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  let apiKeyName: string | undefined;
+  try {
+    const user = await whoami({ apiKey: key, retry: { attempts: 1 } });
+    apiKeyName = user.apiKeyName;
+  } catch (err) {
+    const msg = `Validation failed: ${errorMessage(err)}`;
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
+    } else {
+      io.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  await storeApiKey(key);
+
+  if (json) {
+    io.stdout.write(
+      `${JSON.stringify({ ok: true, source: "keychain", backend: backend.name, apiKeyName })}\n`,
+    );
+  } else {
+    io.stdout.write(`Key stored in ${backend.name}${apiKeyName ? ` (${apiKeyName})` : ""}\n`);
+  }
+  return 0;
+}
+
+async function runLogout(io: CommandIO, json: boolean): Promise<ExitCode> {
+  const backend = detectBackend();
+  if (!backend) {
+    const msg = "No supported keychain backend on this platform.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
+    } else {
+      io.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
+
+  await deleteApiKey();
+
+  if (json) {
+    io.stdout.write(`${JSON.stringify({ ok: true, backend: backend.name })}\n`);
+  } else {
+    io.stdout.write(`Key removed from ${backend.name}\n`);
+  }
+  return 0;
+}
+
 export async function runSetup(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   const parsed = parseArgs(args, {
     long: {
       json: "boolean",
       help: "boolean",
+      login: "boolean",
+      logout: "boolean",
       "enable-gate": "boolean",
       "disable-gate": "boolean",
       "set-model": "string",
@@ -217,6 +337,14 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     io.stdout.write(HELP);
     return 0;
   }
+
+  const jsonFlag = bool(parsed, "json");
+
+  if (bool(parsed, "login") && bool(parsed, "logout")) {
+    throw new UsageError("--login and --logout are mutually exclusive");
+  }
+  if (bool(parsed, "login")) return runLogin(io, jsonFlag);
+  if (bool(parsed, "logout")) return runLogout(io, jsonFlag);
 
   const enableGate = bool(parsed, "enable-gate");
   const disableGate = bool(parsed, "disable-gate");
@@ -233,8 +361,6 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     throw new UsageError("--set-model requires a non-empty model id");
   }
 
-  // Pre-fetch the catalog when validating --set-model so buildReport can
-  // reuse it instead of listing models a second time.
   let prefetchedCatalog: SDKModel[] | undefined;
   if (setModelId) {
     prefetchedCatalog = await listModels();
@@ -257,7 +383,7 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     ...(prefetchedCatalog ? { prefetchedCatalog } : {}),
   });
 
-  if (bool(parsed, "json")) {
+  if (jsonFlag) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     io.stdout.write(renderReport(report));

@@ -4,6 +4,7 @@ import { type OneShotOptions, oneShot } from "./lib/cursor-agent.mjs";
 import { DEFAULT_GATE_TIMEOUT_MS, readGateConfig } from "./lib/gate.mjs";
 import { getDiff, getStatus } from "./lib/git.mjs";
 import { parseHookPayload, readHookStdinSync } from "./lib/hook-payload.mjs";
+import { interpolateTemplate, loadPromptTemplate } from "./lib/prompts.mjs";
 import { type ReviewOutput, renderReviewResult } from "./lib/render.mjs";
 import { resolveStateDir } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
@@ -34,18 +35,6 @@ export interface BlockDecision {
   reason: string;
 }
 
-const GATE_INSTRUCTIONS = [
-  "You are an automated review gate. Claude Code is about to stop and return",
-  "  control to the user. Independently review the working-tree diff for",
-  "  issues that would be unsafe to merge as-is.",
-  "Be conservative: do NOT flag style nits, refactors, or speculative concerns.",
-  "Set verdict='needs-attention' ONLY when there is at least one finding with",
-  "  severity 'critical' or 'high'. Otherwise set verdict='approve'.",
-  "Cite file:line for each finding so Claude can locate it.",
-  "Output ONLY a single JSON object matching the schema below — no prose,",
-  "  no markdown fences.",
-].join("\n");
-
 const SCHEMA = `{
   "verdict": "approve" | "needs-attention",
   "summary": string,
@@ -63,18 +52,11 @@ const SCHEMA = `{
 }`;
 
 function buildPrompt(diff: string, status: string): string {
-  return [
-    GATE_INSTRUCTIONS,
-    "",
-    "Output schema:",
+  return interpolateTemplate(loadPromptTemplate("stop-review-gate"), {
     SCHEMA,
-    "",
-    "Working-tree status:",
-    status || "(clean)",
-    "",
-    "Diff to review:",
-    diff,
-  ].join("\n");
+    STATUS: status || "(clean)",
+    DIFF: diff,
+  });
 }
 
 /**
