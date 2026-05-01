@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SDKMessage } from "@cursor/sdk";
@@ -116,5 +116,59 @@ describe("CLI: task", () => {
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("task", "do thing"), io)).toBe(1);
+  });
+
+  it("--prompt-file reads the prompt body from disk", async () => {
+    const promptPath = path.join(workDir, "prompt.txt");
+    writeFileSync(promptPath, "Body from file: refactor module X\n");
+
+    const run = makeRun({
+      events: [assistantText("run-pfile", "ok")],
+      result: { id: "run-pfile", status: "finished" },
+    });
+    const agent = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(agent);
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("task", "--prompt-file", promptPath), io)).toBe(0);
+    expect(sentPrompt(agent)).toContain("Body from file: refactor module X");
+  });
+
+  it("--prompt-file concatenates with positional prompt (positional first)", async () => {
+    const promptPath = path.join(workDir, "tail.txt");
+    writeFileSync(promptPath, "FILE-BODY-MARKER");
+
+    const run = makeRun({
+      events: [],
+      result: { id: "run-pfile-cat", status: "finished" },
+    });
+    const agent = fakeAgent(run);
+    sdkMocks.agentCreate.mockResolvedValue(agent);
+
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("task", "POS-PROMPT-MARKER", "--prompt-file", promptPath), io),
+    ).toBe(0);
+    const prompt = sentPrompt(agent);
+    const posIdx = prompt.indexOf("POS-PROMPT-MARKER");
+    const fileIdx = prompt.indexOf("FILE-BODY-MARKER");
+    expect(posIdx).toBeGreaterThanOrEqual(0);
+    expect(fileIdx).toBeGreaterThan(posIdx);
+  });
+
+  it("--prompt-file with a missing path exits 2 with usage error", async () => {
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("task", "--prompt-file", path.join(workDir, "nope.txt")), io),
+    ).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("failed to read --prompt-file");
+  });
+
+  it("no prompt and no --prompt-file exits 2", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("task"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain(
+      "task requires a prompt argument or --prompt-file",
+    );
   });
 });

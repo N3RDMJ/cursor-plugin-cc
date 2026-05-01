@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({
   agentCreate: vi.fn(),
   agentResume: vi.fn(),
+  agentList: vi.fn(),
   cursorMe: vi.fn(),
   modelsList: vi.fn(),
 }));
@@ -16,7 +17,11 @@ vi.mock("@cursor/sdk", async () => {
   const actual = await vi.importActual<typeof import("@cursor/sdk")>("@cursor/sdk");
   return {
     ...actual,
-    Agent: { create: sdkMocks.agentCreate, resume: sdkMocks.agentResume },
+    Agent: {
+      create: sdkMocks.agentCreate,
+      resume: sdkMocks.agentResume,
+      list: sdkMocks.agentList,
+    },
     Cursor: { me: sdkMocks.cursorMe, models: { list: sdkMocks.modelsList } },
   };
 });
@@ -216,5 +221,70 @@ describe("CLI: resume", () => {
     expect(failed).toBeDefined();
     const persisted = readJob(stateDir, failed?.id ?? "");
     expect(persisted?.error).toContain("resume failed for agent-bad");
+  });
+
+  it("--list --remote queries the SDK and renders the durable rows", async () => {
+    sdkMocks.agentList.mockResolvedValue({
+      items: [
+        {
+          agentId: "agent-remote-1",
+          name: "Remote agent A",
+          summary: "Refactor module foo",
+          lastModified: 1_700_000_000_000,
+          status: "finished",
+          runtime: "local",
+        },
+      ],
+    });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--remote"), io)).toBe(0);
+    expect(sdkMocks.agentList).toHaveBeenCalledTimes(1);
+    expect(sdkMocks.agentList).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: "local", cwd: workDir }),
+    );
+    const stdout = io.captured.stdout.join("");
+    expect(stdout).toContain("agent-remote-1");
+    expect(stdout).toContain("Refactor module foo");
+    expect(stdout).toContain("finished");
+  });
+
+  it("--list --remote --json passes through the SDK rows as JSON", async () => {
+    sdkMocks.agentList.mockResolvedValue({
+      items: [
+        {
+          agentId: "agent-remote-json",
+          name: "x",
+          summary: "y",
+          lastModified: 1,
+        },
+      ],
+    });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--remote", "--json"), io)).toBe(0);
+    const parsed = JSON.parse(io.captured.stdout.join(""));
+    expect(parsed[0].agentId).toBe("agent-remote-json");
+  });
+
+  it("--list --remote --cloud passes runtime: cloud to Agent.list", async () => {
+    sdkMocks.agentList.mockResolvedValue({ items: [] });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--remote", "--cloud"), io)).toBe(0);
+    expect(sdkMocks.agentList).toHaveBeenCalledWith(expect.objectContaining({ runtime: "cloud" }));
+    expect(io.captured.stdout.join("")).toContain("(no durable agents reported by the SDK)");
+  });
+
+  it("--remote without --list is rejected", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--remote", "agent-x", "go"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("--remote requires --list");
+  });
+
+  it("--list --cloud without --remote is rejected", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--cloud"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("--list --cloud requires --remote");
   });
 });

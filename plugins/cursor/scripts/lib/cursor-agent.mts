@@ -267,6 +267,48 @@ export async function listArtifacts(agent: SDKAgent): Promise<SDKArtifact[]> {
   return agent.listArtifacts();
 }
 
+export interface RemoteAgentRow {
+  agentId: string;
+  name: string;
+  summary: string;
+  /** ms since epoch from the SDK; pass through unchanged. */
+  lastModified: number;
+  status?: "running" | "finished" | "error";
+  archived?: boolean;
+  runtime?: "local" | "cloud";
+}
+
+/**
+ * Enumerate durable agents the SDK knows about for this workspace. Used by
+ * `/cursor:resume --list --remote` to surface agents that aren't in our local
+ * job index (e.g. created by a previous cursor-plugin-cc install or directly
+ * via the SDK).
+ *
+ * `runtime` defaults to "local" + the supplied cwd. Use `runtime: "cloud"` to
+ * list cloud agents — note cloud listing always requires `CURSOR_API_KEY`.
+ */
+export async function listRemoteAgents(
+  options:
+    | { cwd: string; runtime?: "local"; limit?: number }
+    | { runtime: "cloud"; limit?: number },
+): Promise<RemoteAgentRow[]> {
+  const limit = options.limit ?? 25;
+  const listOpts =
+    options.runtime === "cloud"
+      ? ({ runtime: "cloud", limit } as const)
+      : ({ runtime: "local", cwd: options.cwd, limit } as const);
+  const { items } = await Agent.list(listOpts);
+  return items.map((info) => ({
+    agentId: info.agentId,
+    name: info.name,
+    summary: info.summary,
+    lastModified: info.lastModified,
+    ...(info.status ? { status: info.status } : {}),
+    ...(info.archived !== undefined ? { archived: info.archived } : {}),
+    ...(info.runtime ? { runtime: info.runtime } : {}),
+  }));
+}
+
 export async function downloadArtifact(agent: SDKAgent, path: string): Promise<Buffer> {
   return agent.downloadArtifact(path);
 }

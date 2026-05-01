@@ -61,7 +61,7 @@ describe("cursor-companion router", () => {
   it("task without a prompt exits 2 (UsageError)", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("task"), io)).toBe(2);
-    expect(io.captured.stderr.join("")).toContain("task requires a prompt argument");
+    expect(io.captured.stderr.join("")).toContain("task requires a prompt");
   });
 
   it("--help on a subcommand prints subcommand help and exits 0", async () => {
@@ -99,6 +99,18 @@ describe("cursor-companion router", () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("resume", "--help"), io)).toBe(0);
     expect(io.captured.stdout.join("")).toContain("Reattach to an existing Cursor agent");
+  });
+
+  it("status --wait without a job-id exits 2 (UsageError)", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("status", "--wait"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("--wait/--timeout-ms/--poll-ms require");
+  });
+
+  it("status <missing-id> --wait exits 1 with not-found diagnostic", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("status", "no-such-job", "--wait"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("job not found");
   });
 
   it("setup without API key exits 1 with diagnostic", async () => {

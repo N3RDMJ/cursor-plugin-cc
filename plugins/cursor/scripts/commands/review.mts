@@ -3,26 +3,34 @@ import type { ModelSelection } from "@cursor/sdk";
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
-import { getDiff, getStatus } from "../lib/git.mjs";
+import { getDiff, getStatus, type ReviewScope, resolveReviewTarget } from "../lib/git.mjs";
 import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
 import { type ReviewOutput, renderReviewResult } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const HELP = `cursor-companion review [flags]
-cursor-companion adversarial-review [flags]
+cursor-companion adversarial-review [flags] [focus text...]
 
-Review the working-tree diff (or staged diff with --staged). Returns a
-structured ReviewOutput JSON: verdict, summary, findings[], next_steps[].
+Review a git diff. Returns a structured ReviewOutput JSON: verdict, summary,
+findings[], next_steps[]. Adversarial-review additionally accepts free-form
+focus text as positional arguments — those are passed to the reviewer as the
+priority axis.
 
 flags:
   --staged             Review staged changes only (git diff --cached)
-  --base <ref>         Diff against this ref instead of working tree
+  --scope <auto|working-tree|branch>
+                       Review scope. 'auto' (default) picks working-tree when
+                       the tree is dirty, otherwise branch-vs-default-branch.
+                       Mutually exclusive with --staged.
+  --base <ref>         Diff against this ref. Implies branch scope.
   --model <id>         Override the default model
   --timeout <ms>       Cancel the review if it exceeds this duration
   --json               Print the raw structured review JSON
   --help, -h
 `;
+
+const VALID_SCOPES = new Set<ReviewScope>(["auto", "working-tree", "branch"]);
 
 const REVIEW_INSTRUCTIONS = [
   "You are a senior code reviewer doing a focused review of a small change.",
@@ -60,10 +68,12 @@ const SCHEMA = `{
 
 interface ReviewFlags {
   staged: boolean;
+  scope: ReviewScope;
   baseRef?: string;
   model?: ModelSelection;
   timeoutMs?: number;
   json: boolean;
+  focus: string;
 }
 
 class HelpRequested extends Error {}
@@ -72,6 +82,7 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   const parsed = parseArgs(args, {
     long: {
       staged: "boolean",
+      scope: "string",
       base: "string",
       model: "string",
       timeout: "string",
@@ -81,9 +92,21 @@ function parseFlags(args: readonly string[]): ReviewFlags {
     short: { h: "help", m: "model" },
   });
   if (bool(parsed, "help")) throw new HelpRequested();
+  const staged = bool(parsed, "staged");
+  const scopeRaw = optionalString(parsed, "scope");
+  if (scopeRaw && !VALID_SCOPES.has(scopeRaw as ReviewScope)) {
+    throw new UsageError(
+      `invalid --scope: ${scopeRaw} (expected one of ${[...VALID_SCOPES].join(", ")})`,
+    );
+  }
+  if (staged && scopeRaw && scopeRaw !== "working-tree") {
+    throw new UsageError("--staged is only compatible with --scope working-tree");
+  }
   const flags: ReviewFlags = {
-    staged: bool(parsed, "staged"),
+    staged,
+    scope: (scopeRaw as ReviewScope | undefined) ?? "auto",
     json: bool(parsed, "json"),
+    focus: parsed.positionals.join(" ").trim(),
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
@@ -98,19 +121,30 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   return flags;
 }
 
-function buildReviewPrompt(diff: string, status: string, instructions: string): string {
-  return [
-    instructions,
+interface ReviewPromptInput {
+  diff: string;
+  status: string;
+  instructions: string;
+  targetLabel: string;
+  focus: string;
+}
+
+function buildReviewPrompt(input: ReviewPromptInput): string {
+  const sections: string[] = [
+    input.instructions,
     "",
     "Output schema:",
     SCHEMA,
     "",
-    "Working-tree status:",
-    status || "(clean)",
+    `Review target: ${input.targetLabel}`,
     "",
-    "Diff to review:",
-    diff,
-  ].join("\n");
+  ];
+  if (input.focus) {
+    sections.push("Reviewer focus (priority axis):", input.focus, "");
+  }
+  sections.push("Working-tree status:", input.status || "(clean)", "");
+  sections.push("Diff to review:", input.diff);
+  return sections.join("\n");
 }
 
 /**
@@ -165,13 +199,29 @@ export async function runReview(
     throw err;
   }
 
+  if (flags.focus && !options.adversarial) {
+    throw new UsageError(
+      "free-form focus text is only accepted for adversarial-review (got positional args)",
+    );
+  }
+
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
 
   const diffOpts: { staged?: boolean; baseRef?: string } = {};
-  if (flags.staged) diffOpts.staged = true;
-  if (flags.baseRef) diffOpts.baseRef = flags.baseRef;
+  let targetLabel: string;
+  if (flags.staged) {
+    diffOpts.staged = true;
+    targetLabel = "staged diff";
+  } else {
+    const target = resolveReviewTarget(workspaceRoot, {
+      scope: flags.scope,
+      ...(flags.baseRef ? { baseRef: flags.baseRef } : {}),
+    });
+    if (target.baseRef) diffOpts.baseRef = target.baseRef;
+    targetLabel = target.label;
+  }
   const diff = getDiff(workspaceRoot, diffOpts);
   if (!diff) {
     io.stderr.write("nothing to review (empty diff)\n");
@@ -179,11 +229,17 @@ export async function runReview(
   }
 
   const instructions = options.adversarial ? ADVERSARIAL_INSTRUCTIONS : REVIEW_INSTRUCTIONS;
-  const prompt = buildReviewPrompt(diff, getStatus(workspaceRoot), instructions);
+  const prompt = buildReviewPrompt({
+    diff,
+    status: getStatus(workspaceRoot),
+    instructions,
+    targetLabel,
+    focus: flags.focus,
+  });
 
   const job = createJob(stateDir, {
     type: options.adversarial ? "adversarial-review" : "review",
-    prompt: `${options.adversarial ? "adversarial-" : ""}review of ${flags.staged ? "staged" : "working-tree"} diff`,
+    prompt: `${options.adversarial ? "adversarial-" : ""}review (${targetLabel})`,
   });
 
   const oneShotOpts: Parameters<typeof oneShot>[1] = {

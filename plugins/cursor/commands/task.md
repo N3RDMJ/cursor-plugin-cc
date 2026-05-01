@@ -17,8 +17,10 @@ Default invocation:
 
 > Use the cursor-rescue subagent with: `$ARGUMENTS`
 
-If the user passed `--write`, `--cloud`, `--background`, `--force`, or
-`--model`, include them verbatim in the prompt to the subagent.
+If the user passed `--write`, `--cloud`, `--background`, `--force`,
+`--model`, or `--prompt-file <path>`, include them verbatim in the prompt
+to the subagent. `--prompt-file` is useful when the task description is
+long enough to be cumbersome inline.
 
 When the result comes back, follow `cursor-result-handling/SKILL.md` —
 present the deliverables and any caveats clearly, do not silently accept

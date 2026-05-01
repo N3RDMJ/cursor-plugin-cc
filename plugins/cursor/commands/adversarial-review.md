@@ -14,6 +14,11 @@ unnecessary state, and brittle assumptions.
 node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs adversarial-review $ARGUMENTS
 ```
 
-Same output shape as `/cursor:review`. If the change is genuinely simple and
-correct, the review will say so — adversarial framing is not "always find
-fault." Surface the output verbatim to the user.
+Same output shape and flags as `/cursor:review`, plus free-form positional
+**focus text** that becomes the priority axis for the reviewer (e.g.
+`/cursor:adversarial-review concurrency and atomicity` or
+`--scope branch -- security`).
+
+If the change is genuinely simple and correct, the review will say so —
+adversarial framing is not "always find fault." Surface the output verbatim
+to the user.

@@ -5,6 +5,8 @@ import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import {
   buildAgentOptionsFromFlags,
   buildPrompt,
+  listRemoteAgents,
+  type RemoteAgentRow,
   resumeAgent,
   writePolicyText,
 } from "../lib/cursor-agent.mjs";
@@ -29,6 +31,9 @@ keeps its prior context, so follow-up prompts are cheaper than starting fresh.
 flags:
   --last               Resume the most recent task agent (no agent-id needed)
   --list               Print known agent ids from this workspace, then exit
+  --remote             With --list: query the SDK for durable agents instead
+                       of the local job index. Combine with --cloud to list
+                       cloud-runtime agents (requires CURSOR_API_KEY).
   --limit <n>          With --list: cap the number of rows (default 10)
   --write              Allow file modifications (default: read-only)
   --background         Start the run and exit, returning the job id
@@ -46,6 +51,8 @@ interface ListFlags {
   kind: "list";
   limit: number;
   json: boolean;
+  remote: boolean;
+  cloud: boolean;
 }
 
 interface RunFlags {
@@ -71,6 +78,7 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     long: {
       last: "boolean",
       list: "boolean",
+      remote: "boolean",
       limit: "string",
       write: "boolean",
       background: "boolean",
@@ -89,6 +97,9 @@ function parseFlags(args: readonly string[]): ResumeFlags {
   const list = bool(parsed, "list");
   const json = bool(parsed, "json");
 
+  const remote = bool(parsed, "remote");
+  const cloud = bool(parsed, "cloud");
+
   if (list) {
     if (last) throw new UsageError("--list and --last are mutually exclusive");
     let limit = DEFAULT_LIST_LIMIT;
@@ -98,8 +109,13 @@ function parseFlags(args: readonly string[]): ResumeFlags {
       if (!Number.isFinite(n) || n < 0) throw new UsageError(`invalid --limit: ${limitArg}`);
       limit = Math.floor(n);
     }
-    return { kind: "list", limit, json };
+    if (cloud && !remote) {
+      throw new UsageError("--list --cloud requires --remote (cloud listing goes through the SDK)");
+    }
+    return { kind: "list", limit, json, remote, cloud };
   }
+
+  if (remote) throw new UsageError("--remote requires --list");
 
   if (optionalString(parsed, "limit") !== undefined) {
     throw new UsageError("--limit requires --list");
@@ -129,7 +145,7 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     write: bool(parsed, "write"),
     background: bool(parsed, "background"),
     force: bool(parsed, "force"),
-    cloud: bool(parsed, "cloud"),
+    cloud,
     json,
   };
   const modelId = optionalString(parsed, "model");
@@ -166,6 +182,29 @@ function renderListText(rows: RecentTaskAgent[], now: number = Date.now()): stri
   return `${header}\n${separator}\n${body}\n`;
 }
 
+export function renderRemoteListText(rows: RemoteAgentRow[], now: number = Date.now()): string {
+  if (rows.length === 0) return "(no durable agents reported by the SDK)\n";
+  const formatted = rows.map((r) => ({
+    agentId: r.agentId,
+    age: ageFromIso(new Date(r.lastModified).toISOString(), now),
+    status: r.status ?? "—",
+    summary: r.summary ? compactText(r.summary).slice(0, 60) : compactText(r.name).slice(0, 60),
+  }));
+  const widths = {
+    agentId: Math.max("agent-id".length, ...formatted.map((r) => r.agentId.length)),
+    age: Math.max("age".length, ...formatted.map((r) => r.age.length)),
+    status: Math.max("status".length, ...formatted.map((r) => r.status.length)),
+  };
+  const header = `${"AGENT-ID".padEnd(widths.agentId)}  ${"AGE".padEnd(widths.age)}  ${"STATUS".padEnd(widths.status)}  SUMMARY`;
+  const separator = `${"-".repeat(widths.agentId)}  ${"-".repeat(widths.age)}  ${"-".repeat(widths.status)}  -------`;
+  const body = formatted
+    .map((r) =>
+      `${r.agentId.padEnd(widths.agentId)}  ${r.age.padEnd(widths.age)}  ${r.status.padEnd(widths.status)}  ${r.summary}`.trimEnd(),
+    )
+    .join("\n");
+  return `${header}\n${separator}\n${body}\n`;
+}
+
 export async function runResume(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   let flags: ResumeFlags;
   try {
@@ -182,6 +221,19 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
   const workspaceRoot = resolveWorkspaceRoot(cwd);
 
   if (flags.kind === "list") {
+    if (flags.remote) {
+      const rows = await listRemoteAgents(
+        flags.cloud
+          ? { runtime: "cloud", limit: flags.limit }
+          : { cwd: workspaceRoot, limit: flags.limit },
+      );
+      if (flags.json) {
+        io.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+      } else {
+        io.stdout.write(renderRemoteListText(rows));
+      }
+      return 0;
+    }
     const stateDir = resolveStateDir(workspaceRoot);
     const rows = findRecentTaskAgents(stateDir, flags.limit);
     if (flags.json) {
