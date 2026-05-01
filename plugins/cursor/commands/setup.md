@@ -1,5 +1,6 @@
 ---
 description: Validate the cursor-plugin-cc runtime — Node, API key, account, models. Toggle the Stop review gate.
+argument-hint: '[--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
@@ -9,7 +10,7 @@ disable-model-invocation: true
 Run the plugin's self-check.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs setup $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup $ARGUMENTS
 ```
 
 Pass `--json` for machine-readable output. If anything fails (API key missing,

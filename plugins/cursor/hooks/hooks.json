@@ -1,4 +1,5 @@
 {
+  "description": "Optional stop-time review gate for Cursor Companion.",
   "hooks": {
     "SessionStart": [
       {

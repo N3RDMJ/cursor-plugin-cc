@@ -1,28 +1,58 @@
 ---
-description: Independent code review of the working-tree diff via Cursor.
-allowed-tools: Bash(node:*)
-disable-model-invocation: true
+description: Run a Cursor code review against local git state
+argument-hint: '[--wait|--background] [--base <ref>] [--staged] [--scope auto|working-tree|branch]'
+allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
 ---
 
-# /cursor:review
+Run a Cursor review through the shared plugin runtime.
 
-Run a Cursor-driven structured review of the current diff.
+Raw slash-command arguments:
+`$ARGUMENTS`
 
+Core constraint:
+- This command is review-only.
+- Do not fix issues, apply patches, or suggest that you are about to make changes.
+- Your only job is to run the review and return Cursor's output verbatim to the user.
+
+Execution mode rules:
+- If the raw arguments include `--wait`, do not ask. Run the review in the foreground.
+- If the raw arguments include `--background`, do not ask. Run the review in a Claude background task.
+- Otherwise, estimate the review size before asking:
+  - For working-tree review, start with `git status --short --untracked-files=all`.
+  - For working-tree review, also inspect both `git diff --shortstat --cached` and `git diff --shortstat`.
+  - For base-branch review, use `git diff --shortstat <base>...HEAD`.
+  - Treat untracked files or directories as reviewable work even when `git diff --shortstat` is empty.
+  - Only conclude there is nothing to review when the relevant working-tree status is empty or the explicit branch diff is empty.
+  - Recommend waiting only when the review is clearly tiny, roughly 1-2 files total and no sign of a broader directory-sized change.
+  - In every other case, including unclear size, recommend background.
+  - When in doubt, run the review instead of declaring that there is nothing to review.
+- Then use `AskUserQuestion` exactly once with two options, putting the recommended option first and suffixing its label with `(Recommended)`:
+  - `Wait for results`
+  - `Run in background`
+
+Argument handling:
+- `--wait` and `--background` are execution-mode flags for Claude Code, not for the companion script. Strip them from the arguments before invoking the companion. The companion does not accept these flags.
+- Preserve all other user arguments exactly (`--staged`, `--scope`, `--base`, `--model`, `--timeout`, `--json`).
+- Do not add extra review instructions or rewrite the user's intent.
+- If the user needs custom review instructions or more adversarial framing, they should use `/cursor:adversarial-review`.
+
+Foreground flow:
+- Strip `--wait` and `--background` from `$ARGUMENTS`, then run:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs review $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" review <remaining-args>
 ```
+- Return the command stdout verbatim, exactly as-is.
+- Do not paraphrase, summarize, or add commentary before or after it.
+- Do not fix any issues mentioned in the review output.
 
-Useful flags:
-- `--staged` — review staged changes only
-- `--scope <auto|working-tree|branch>` — review scope. `auto` (default) picks
-  working-tree when the tree is dirty, otherwise diffs against the detected
-  default branch (`main`/`master`/`trunk`).
-- `--base <ref>` — diff against a specific ref. Implies branch scope.
-- `--json` — emit the structured ReviewOutput JSON unchanged
-
-The CLI prints a verdict (`approve` / `needs-attention`), a summary, and
-per-finding entries with severity, file:line, and a recommendation. Exit code
-is 0 on `approve`, 1 on `needs-attention` or any failure.
-
-Pass the output through to the user. Do not summarize away severity or file
-locations — they are the high-signal bits.
+Background flow:
+- Launch the review with `Bash` in the background:
+```typescript
+Bash({
+  command: `node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" review <remaining-args>`,
+  description: "Cursor review",
+  run_in_background: true
+})
+```
+- Do not call `BashOutput` or wait for completion in this turn.
+- After launching the command, tell the user: "Cursor review started in the background. Check `/cursor:status` for progress."
