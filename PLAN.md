@@ -740,7 +740,9 @@ without new abstractions.
 - [x] `commands/adversarial-review.md` — focus-text usage
 - [x] `commands/status.md` — `--wait`/`--timeout-ms`/`--poll-ms`
 - [x] `commands/task.md` — mention `--prompt-file`
+- [x] `commands/task.md` — document model resolution chain (flag > env > config > fallback)
 - [x] `commands/resume.md` — `--list --remote [--cloud]` discovery
+- [x] `commands/resume.md` — document model resolution chain
 - [x] `PLAN.md` — this section
 
 ### 9.7 Deliberately deferred

@@ -22,6 +22,9 @@ If the user passed `--write`, `--cloud`, `--background`, `--force`,
 to the subagent. `--prompt-file` is useful when the task description is
 long enough to be cumbersome inline.
 
+Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default
+(set via `/cursor:setup --set-model <id>`) > built-in fallback.
+
 When the result comes back, follow `cursor-result-handling/SKILL.md` —
 present the deliverables and any caveats clearly, do not silently accept
 the output.
