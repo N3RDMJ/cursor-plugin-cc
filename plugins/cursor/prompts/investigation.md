@@ -14,6 +14,8 @@ If you want to suggest changes, describe them in prose — do not produce diffs,
 </write_policy>
 
 <constraints>
+Read TypeScript source files (.mts/.ts), not compiled bundles (.mjs/.js). If the workspace context lists compiled output, ignore those files entirely.
+Start by listing files to understand the project structure before reading code.
 Focus your investigation on the files and modules directly relevant to the question.
 Do not read SDK internals, type definitions, or unrelated modules unless the question specifically requires it.
 Complete your analysis efficiently: aim for the fewest tool calls that produce a thorough answer.
