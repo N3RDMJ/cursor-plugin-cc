@@ -8,7 +8,7 @@ import {
   parseReview,
   readGateConfig,
   renderReviewResult
-} from "./chunk-CRD23GWL.mjs";
+} from "./chunk-OUYHEEC5.mjs";
 import {
   parseHookPayload,
   readHookStdinSync
@@ -16,7 +16,7 @@ import {
 import {
   resolveStateDir,
   resolveWorkspaceRoot
-} from "./chunk-P7QODZNJ.mjs";
+} from "./chunk-PI7XIE4N.mjs";
 
 // plugins/cursor/scripts/stop-review-gate-hook.mts
 var SCHEMA = `{

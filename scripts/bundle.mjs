@@ -19,7 +19,7 @@ await build({
   target: "node18",
   outdir,
   outExtension: { ".js": ".mjs" },
-  external: ["@cursor/sdk"],
+  external: ["@cursor/sdk", "@napi-rs/keyring"],
 });
 
 for (const f of await readdir(outdir)) {

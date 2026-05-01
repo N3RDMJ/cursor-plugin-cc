@@ -9,6 +9,8 @@ import {
   compactText,
   createAgent,
   createJob,
+  deleteApiKey,
+  detectBackend,
   disposeAgent,
   findRecentTaskAgents,
   getBranch,
@@ -26,6 +28,7 @@ import {
   optionalString,
   parseArgs,
   readGateConfig,
+  reconcileStaleJobs,
   registerActiveRun,
   renderError,
   renderJobTable,
@@ -37,17 +40,18 @@ import {
   sendTask,
   setDefaultModel,
   setGateEnabled,
+  storeApiKey,
   toAgentEvents,
   unregisterActiveRun,
   validateModel,
   whoami
-} from "./chunk-CRD23GWL.mjs";
+} from "./chunk-OUYHEEC5.mjs";
 import {
   ensureStateDir,
   readJobLog,
   resolveStateDir,
   resolveWorkspaceRoot
-} from "./chunk-P7QODZNJ.mjs";
+} from "./chunk-PI7XIE4N.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -448,9 +452,15 @@ var HELP4 = `cursor-companion setup [flags]
 
 Validates the plugin runtime:
   - Node.js >= ${NODE_MIN_MAJOR}
-  - CURSOR_API_KEY is set
+  - API key is available (env or keychain)
   - Cursor.me() succeeds (key is valid)
   - Cursor.models.list() returns at least one model
+
+Credential management:
+  --login              Store a Cursor API key in the OS keychain.
+                       Reads from stdin (pipe or interactive hidden input).
+                       Validates via Cursor.me() before storing.
+  --logout             Remove the stored key from the OS keychain.
 
 Stop review gate (per workspace, opt-in):
   --enable-gate        Turn on the Stop review gate for this workspace
@@ -518,8 +528,9 @@ async function buildReport(input) {
     gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot }
   };
   try {
-    resolveApiKey();
+    const { source } = await resolveApiKey();
     report.apiKey.ok = true;
+    report.apiKey.source = source;
   } catch (err) {
     report.apiKey.error = errorMessage(err);
     return report;
@@ -544,9 +555,8 @@ function renderReport(report) {
   const lines = [];
   const yes = (ok) => ok ? "ok" : "fail";
   lines.push(`Node.js     ${yes(report.node.ok)}  (${report.node.version})`);
-  lines.push(
-    `API key     ${yes(report.apiKey.ok)}` + (report.apiKey.error ? `  ${report.apiKey.error}` : "")
-  );
+  const keyDetail = report.apiKey.ok ? `  (source: ${report.apiKey.source})` : report.apiKey.error ? `  ${report.apiKey.error}` : "";
+  lines.push(`API key     ${yes(report.apiKey.ok)}${keyDetail}`);
   if (report.account.ok) {
     lines.push(`Account     ok    (key: ${report.account.apiKeyName ?? "?"})`);
   } else if (report.account.error) {
@@ -579,11 +589,129 @@ function describeSource(source) {
       return "built-in fallback";
   }
 }
+async function readHiddenInput(io) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    if (!stdin.isTTY) {
+      let data = "";
+      stdin.setEncoding("utf8");
+      stdin.on("data", (chunk) => {
+        data += chunk;
+      });
+      stdin.on("end", () => resolve(data.trim()));
+      stdin.on("error", reject);
+      stdin.resume();
+      return;
+    }
+    io.stderr.write("Enter Cursor API key: ");
+    const prev = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.setEncoding("utf8");
+    stdin.resume();
+    let buf = "";
+    const onData = (ch) => {
+      if (ch === "\n" || ch === "\r" || ch === "") {
+        stdin.setRawMode(prev);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        io.stderr.write("\n");
+        resolve(buf.trim());
+      } else if (ch === "") {
+        stdin.setRawMode(prev);
+        stdin.pause();
+        stdin.removeListener("data", onData);
+        reject(new Error("Aborted"));
+      } else if (ch === "\x7F" || ch === "\b") {
+        buf = buf.slice(0, -1);
+      } else {
+        buf += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+async function runLogin(io, json) {
+  const backend = detectBackend();
+  if (!backend) {
+    const msg = "No supported keychain backend on this platform. Use CURSOR_API_KEY env instead.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}
+`);
+    } else {
+      io.stderr.write(`${msg}
+`);
+    }
+    return 1;
+  }
+  const key = await readHiddenInput(io);
+  if (!key) {
+    const msg = "No key provided.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}
+`);
+    } else {
+      io.stderr.write(`${msg}
+`);
+    }
+    return 1;
+  }
+  let apiKeyName;
+  try {
+    const user = await whoami({ apiKey: key, retry: { attempts: 1 } });
+    apiKeyName = user.apiKeyName;
+  } catch (err) {
+    const msg = `Validation failed: ${errorMessage(err)}`;
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}
+`);
+    } else {
+      io.stderr.write(`${msg}
+`);
+    }
+    return 1;
+  }
+  await storeApiKey(key);
+  if (json) {
+    io.stdout.write(
+      `${JSON.stringify({ ok: true, source: "keychain", backend: backend.name, apiKeyName })}
+`
+    );
+  } else {
+    io.stdout.write(`Key stored in ${backend.name}${apiKeyName ? ` (${apiKeyName})` : ""}
+`);
+  }
+  return 0;
+}
+async function runLogout(io, json) {
+  const backend = detectBackend();
+  if (!backend) {
+    const msg = "No supported keychain backend on this platform.";
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}
+`);
+    } else {
+      io.stderr.write(`${msg}
+`);
+    }
+    return 1;
+  }
+  await deleteApiKey();
+  if (json) {
+    io.stdout.write(`${JSON.stringify({ ok: true, backend: backend.name })}
+`);
+  } else {
+    io.stdout.write(`Key removed from ${backend.name}
+`);
+  }
+  return 0;
+}
 async function runSetup(args, io) {
   const parsed = parseArgs(args, {
     long: {
       json: "boolean",
       help: "boolean",
+      login: "boolean",
+      logout: "boolean",
       "enable-gate": "boolean",
       "disable-gate": "boolean",
       "set-model": "string",
@@ -595,6 +723,12 @@ async function runSetup(args, io) {
     io.stdout.write(HELP4);
     return 0;
   }
+  const jsonFlag = bool(parsed, "json");
+  if (bool(parsed, "login") && bool(parsed, "logout")) {
+    throw new UsageError("--login and --logout are mutually exclusive");
+  }
+  if (bool(parsed, "login")) return runLogin(io, jsonFlag);
+  if (bool(parsed, "logout")) return runLogout(io, jsonFlag);
   const enableGate = bool(parsed, "enable-gate");
   const disableGate = bool(parsed, "disable-gate");
   if (enableGate && disableGate) {
@@ -625,7 +759,7 @@ async function runSetup(args, io) {
     gateEnabled,
     ...prefetchedCatalog ? { prefetchedCatalog } : {}
   });
-  if (bool(parsed, "json")) {
+  if (jsonFlag) {
     io.stdout.write(`${JSON.stringify(report, null, 2)}
 `);
   } else {
@@ -689,6 +823,7 @@ async function runStatus(args, io) {
   const wait = bool(parsed, "wait");
   const timeoutMs = parsePositiveMs(parsed, "timeout-ms");
   const pollMs = parsePositiveMs(parsed, "poll-ms");
+  reconcileStaleJobs(stateDir);
   const jobId = parsed.positionals[0];
   if (jobId) {
     let job = getJob(stateDir, jobId);
@@ -917,7 +1052,13 @@ async function runTask(args, io) {
   });
   const job = createJob(stateDir, { type: "task", prompt: flags.prompt });
   const agentOpts = buildAgentOptionsFromFlags(workspaceRoot, flags);
-  const agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);
+  let agent;
+  try {
+    agent = await resolveTaskAgent(flags, stateDir, agentOpts, io);
+  } catch (err) {
+    markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
   const runFlags = { timeoutMs: flags.timeoutMs, force: flags.force, json: flags.json };
   if (flags.background) {
     runAgentTaskBackground({ agent, prompt: fullPrompt, flags: runFlags, stateDir, jobId: job.id });

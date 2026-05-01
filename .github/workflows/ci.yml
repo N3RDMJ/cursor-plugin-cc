@@ -47,9 +47,9 @@ jobs:
     name: live SDK integration
     needs: check
     runs-on: ubuntu-latest
-    # Only on main pushes, and only if the secret is configured. Forks don't
-    # get the secret, so this job no-ops harmlessly there.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Run on main pushes and non-fork PRs. Forks don't get the secret, so
+    # the test suite auto-skips via describe.skipIf(NO_KEY).
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - uses: actions/checkout@v6
 

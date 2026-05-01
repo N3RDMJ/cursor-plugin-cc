@@ -91,6 +91,13 @@ function appendJobLog(stateDir, jobId, text) {
   ensureStateDir(stateDir);
   fs.appendFileSync(getJobLogPath(stateDir, jobId), text, { mode: FILE_MODE });
 }
+function jobLogMtimeMs(stateDir, jobId) {
+  try {
+    return fs.statSync(getJobLogPath(stateDir, jobId)).mtimeMs;
+  } catch {
+    return void 0;
+  }
+}
 function readJobLog(stateDir, jobId) {
   try {
     return fs.readFileSync(getJobLogPath(stateDir, jobId), "utf8");
@@ -138,6 +145,7 @@ export {
   readJob,
   writeJob,
   appendJobLog,
+  jobLogMtimeMs,
   readJobLog,
   readSession,
   writeSession,
