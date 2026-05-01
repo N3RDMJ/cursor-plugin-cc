@@ -7,7 +7,7 @@ disable-model-invocation: true
 # /cursor:result
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs result $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs result $ARGUMENTS
 ```
 
 Required: a job id (from `/cursor:status`).

@@ -4,3 +4,6 @@ dist/
 .env
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Plugin bundle is committed (needed at install time)
+!plugins/cursor/scripts/bundle/

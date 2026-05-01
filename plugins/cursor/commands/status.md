@@ -7,7 +7,7 @@ disable-model-invocation: true
 # /cursor:status
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs status $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs status $ARGUMENTS
 ```
 
 With no arguments: prints a table of recent jobs (id, type, status, age,

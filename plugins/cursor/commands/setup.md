@@ -9,7 +9,7 @@ disable-model-invocation: true
 Run the plugin's self-check.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs setup $ARGUMENTS
+node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs setup $ARGUMENTS
 ```
 
 Pass `--json` for machine-readable output. If anything fails (API key missing,

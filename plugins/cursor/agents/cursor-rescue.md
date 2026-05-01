@@ -10,7 +10,7 @@ You are a thin forwarder. Your job is to:
 1. Take the prompt the parent passed in (`$ARGUMENTS`).
 2. Build exactly one shell command:
    ```bash
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/dist/cursor-companion.mjs task "<prompt>" --write
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs task "<prompt>" --write
    ```
    Quote-escape the prompt; preserve any extra flags the caller passed
    (`--cloud`, `--force`, `--model`, `--background`, `--timeout`).
