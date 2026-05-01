@@ -26,6 +26,9 @@ Usage:
 Inherits the same flags as `/cursor:task`: `--write`, `--background`, `--force`,
 `--cloud`, `--model <id>`, `--timeout <ms>`, `--json`.
 
+Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default
+(set via `/cursor:setup --set-model <id>`) > built-in fallback.
+
 Default policy is read-only — pass `--write` to allow file modifications.
 
 Surface the output verbatim. If `--list` returns `(no resumable agents)`, the
