@@ -3,6 +3,7 @@ dist/
 *.log
 .env
 CLAUDE.local.md
+.worktrees/
 .claude/settings.local.json
 
 # Plugin bundle is committed (needed at install time)
