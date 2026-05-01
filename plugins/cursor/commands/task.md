@@ -1,30 +1,50 @@
 ---
-description: Delegate a coding task to a Cursor agent.
-argument-hint: <prompt>
+description: Delegate investigation, an explicit fix request, or follow-up task to a Cursor agent
+argument-hint: "[--background|--wait] [--resume-last|--fresh] [--model <id>] [--write] [what Cursor should investigate, solve, or continue]"
+allowed-tools: Bash(node:*), AskUserQuestion, Agent
 ---
 
-# /cursor:task
+Invoke the `cursor:cursor-rescue` subagent via the `Agent` tool (`subagent_type: "cursor:cursor-rescue"`), forwarding the raw user request as the prompt.
+`cursor:cursor-rescue` is a subagent, not a skill — do not call `Skill(cursor:cursor-rescue)` or `Skill(cursor:rescue)`. The command runs inline so the `Agent` tool stays in scope.
+The final user-visible response must be Cursor's output verbatim.
 
-Hand off a coding task to a Cursor agent. Use this when the work is
-well-scoped and you want a second pair of hands rather than driving the
-implementation yourself.
+Raw user request:
+$ARGUMENTS
 
-Invoke the `cursor-rescue` subagent with the task description. The subagent
-forwards the prompt to `cursor-companion.mjs task` and returns whatever
-Cursor produces, unchanged.
+Execution mode:
 
-Default invocation:
+- If the request includes `--background`, run the `cursor:cursor-rescue` subagent in the background.
+- If the request includes `--wait`, run the `cursor:cursor-rescue` subagent in the foreground.
+- If neither flag is present, default to foreground.
+- `--background` and `--wait` are execution flags for Claude Code. Do not forward them to `task`, and do not treat them as part of the natural-language task text.
+- `--model` is a runtime-selection flag. Preserve it for the forwarded `task` call, but do not treat it as part of the natural-language task text.
+- If the request includes `--resume-last`, do not ask whether to continue. The user already chose.
+- If the request includes `--fresh`, do not ask whether to continue. The user already chose.
+- Otherwise, before starting Cursor, check for a resumable agent from this workspace by running:
 
-> Use the cursor-rescue subagent with: `$ARGUMENTS`
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --last --dry-run --json 2>/dev/null
+```
 
-If the user passed `--write`, `--cloud`, `--background`, `--force`,
-`--model`, or `--prompt-file <path>`, include them verbatim in the prompt
-to the subagent. `--prompt-file` is useful when the task description is
-long enough to be cumbersome inline.
+- If that helper reports an available agent, use `AskUserQuestion` exactly once to ask whether to continue the current Cursor thread or start a new one.
+- The two choices must be:
+  - `Continue current Cursor thread`
+  - `Start a new Cursor thread`
+- If the user is clearly giving a follow-up instruction such as "continue", "keep going", "resume", "apply the top fix", or "dig deeper", put `Continue current Cursor thread (Recommended)` first.
+- Otherwise put `Start a new Cursor thread (Recommended)` first.
+- If the user chooses continue, add `--resume-last` before routing to the subagent.
+- If the user chooses a new thread, do not add `--resume-last`.
+- If the helper reports no available agent, do not ask. Route normally.
 
-Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default
-(set via `/cursor:setup --set-model <id>`) > built-in fallback.
+Operating rules:
 
-When the result comes back, follow `cursor-result-handling/SKILL.md` —
-present the deliverables and any caveats clearly, do not silently accept
-the output.
+- The subagent is a thin forwarder only. It should use one `Bash` call to invoke `node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" task ...` and return that command's stdout as-is.
+- Return the Cursor companion stdout verbatim to the user.
+- Do not paraphrase, summarize, rewrite, or add commentary before or after it.
+- Do not ask the subagent to inspect files, monitor progress, poll `/cursor:status`, fetch `/cursor:result`, call `/cursor:cancel`, summarize output, or do follow-up work of its own.
+- Leave model unset unless the user explicitly asks for one.
+- Leave `--resume-last` and `--fresh` in the forwarded request. The subagent handles that routing when it builds the `task` command.
+- If the helper reports that Cursor is not configured or `CURSOR_API_KEY` is missing, stop and tell the user to run `/cursor:setup`.
+- If the user did not supply a request, ask what Cursor should investigate or fix.
+
+Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default (set via `/cursor:setup --set-model <id>`) > built-in fallback.

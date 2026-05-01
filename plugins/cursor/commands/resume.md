@@ -1,5 +1,6 @@
 ---
 description: Reattach to an existing Cursor agent and continue the conversation.
+argument-hint: '<agent-id|--last|--list> [prompt] [--write] [--background] [--model <id>]'
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
@@ -7,7 +8,7 @@ disable-model-invocation: true
 # /cursor:resume
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs resume $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume $ARGUMENTS
 ```
 
 Resume a durable Cursor agent. The agent keeps the context from prior runs,
@@ -31,5 +32,11 @@ Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default
 
 Default policy is read-only — pass `--write` to allow file modifications.
 
-Surface the output verbatim. If `--list` returns `(no resumable agents)`, the
-workspace has no recorded agentIds yet — start with `/cursor:task` first.
+Return the command stdout verbatim, exactly as-is. Do not paraphrase,
+summarize, or add commentary.
+
+If the command fails with an authentication error or missing API key, tell
+the user to run `/cursor:setup`.
+
+If `--list` returns `(no resumable agents)`, the workspace has no recorded
+agentIds yet — tell the user to start with `/cursor:task` first.
