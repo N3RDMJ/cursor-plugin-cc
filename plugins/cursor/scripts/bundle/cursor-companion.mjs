@@ -4,6 +4,7 @@ import {
   bool,
   compactText,
   escapeMarkdownCell,
+  fenceCodeBlock,
   formatJobActions,
   interpolateTemplate,
   jobAgentHandoffLines,
@@ -16,7 +17,7 @@ import {
   renderStreamEvent,
   runReview,
   setGateEnabled
-} from "./chunk-VPB6G64I.mjs";
+} from "./chunk-7MBHSW27.mjs";
 import {
   DEFAULT_MODEL,
   TERMINAL_STATUSES,
@@ -970,10 +971,10 @@ function renderJobDetail(job, stateDir) {
     lines.push("", "**Continue this Cursor agent:**", ...handoff);
   }
   if (job.error) {
-    lines.push("", "**Error:**", "", "```", job.error, "```");
+    lines.push("", "**Error:**", "", ...fenceCodeBlock(job.error));
   }
   if (job.prompt) {
-    lines.push("", "**Prompt:**", "", "```", job.prompt, "```");
+    lines.push("", "**Prompt:**", "", ...fenceCodeBlock(job.prompt));
   }
   if (!TERMINAL_STATUSES.has(job.status)) {
     const tail = tailJobLog(stateDir, job.id, PROGRESS_TAIL_LINES);
@@ -982,9 +983,7 @@ function renderJobDetail(job, stateDir) {
         "",
         `**Progress** _(last ${PROGRESS_TAIL_LINES} log lines)_:`,
         "",
-        "```",
-        tail,
-        "```"
+        ...fenceCodeBlock(tail)
       );
     }
   }

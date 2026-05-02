@@ -11,6 +11,7 @@ import {
 } from "../lib/job-control.mjs";
 import {
   escapeMarkdownCell,
+  fenceCodeBlock,
   formatJobActions,
   jobAgentHandoffLines,
   renderJobTable,
@@ -184,10 +185,10 @@ function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): stri
   }
 
   if (job.error) {
-    lines.push("", "**Error:**", "", "```", job.error, "```");
+    lines.push("", "**Error:**", "", ...fenceCodeBlock(job.error));
   }
   if (job.prompt) {
-    lines.push("", "**Prompt:**", "", "```", job.prompt, "```");
+    lines.push("", "**Prompt:**", "", ...fenceCodeBlock(job.prompt));
   }
   // Surface a tail of the streaming log for non-terminal jobs so users can
   // peek at progress without `result --log`.
@@ -198,9 +199,7 @@ function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): stri
         "",
         `**Progress** _(last ${PROGRESS_TAIL_LINES} log lines)_:`,
         "",
-        "```",
-        tail,
-        "```",
+        ...fenceCodeBlock(tail),
       );
     }
   }

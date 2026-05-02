@@ -5,7 +5,7 @@ import {
   parseReview,
   readGateConfig,
   renderReviewResult
-} from "./chunk-VPB6G64I.mjs";
+} from "./chunk-7MBHSW27.mjs";
 import {
   parseHookPayload,
   readHookStdinSync

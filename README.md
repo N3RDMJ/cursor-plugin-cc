@@ -308,11 +308,10 @@ Override the root with `CURSOR_PLUGIN_STATE_ROOT` (useful for tests and developm
 
 ### Moving the Work Over to Cursor
 
-Delegated tasks can be resumed from any of these surfaces:
+Delegated tasks can be resumed from either CLI:
 
 - `/cursor:resume <agent-id>` — continue from Claude Code
 - `cursor-agent resume <agent-id>` — continue from the standalone Cursor CLI
-- `https://cursor.com/agents?id=<agent-id>` — open the agent in Cursor's web UI
 
 `/cursor:status <job-id>` and `/cursor:result <job-id>` print these handoff
 hints inline so you can copy-paste straight into the surface you want.

@@ -221,10 +221,7 @@ export function formatJobActions(entry: Pick<JobIndexEntry, "id" | "status">): s
   if (TERMINAL_STATUSES.has(entry.status)) {
     return `/cursor:result ${entry.id}`;
   }
-  if (entry.status === "running" || entry.status === "pending") {
-    return `/cursor:status ${entry.id} • /cursor:cancel ${entry.id}`;
-  }
-  return "";
+  return `/cursor:status ${entry.id} • /cursor:cancel ${entry.id}`;
 }
 
 function rowsFromJobs(jobs: JobIndexEntry[], now: number): JobTableRow[] {
@@ -264,6 +261,17 @@ export function ageFromIso(iso: string, now: number = Date.now()): string {
 /** Escape a `|` so a value can sit inside a Markdown table cell without breaking it. */
 export function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|");
+}
+
+/**
+ * Wrap text in a fenced code block, picking a fence length that the content
+ * cannot prematurely close. Cursor agent output (errors, prompts, log tails)
+ * regularly contains triple-backtick fences itself.
+ */
+export function fenceCodeBlock(content: string): string[] {
+  const longestRun = (content.match(/`+/g) ?? []).reduce((max, m) => Math.max(max, m.length), 0);
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return [fence, content, fence];
 }
 
 /**
@@ -367,15 +375,14 @@ export function renderReviewResult(review: ReviewOutput): string {
  * `agentId`. Returns an empty array when there is no agent to resume so
  * callers can splice the result directly into a line list.
  *
- * The deep link points at Cursor's web agent dashboard. If/when the SDK
- * exposes a richer scheme (e.g. `cursor://agent/<id>`), swap it in here.
+ * Only the two CLI commands are surfaced — `@cursor/sdk` does not expose a
+ * documented deep-link scheme. Add a URL form here if/when one ships.
  */
 export function jobAgentHandoffLines(agentId: string | undefined): string[] {
   if (!agentId) return [];
   return [
     `- Continue from Claude Code: \`/cursor:resume ${agentId}\``,
     `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``,
-    `- Open in Cursor: https://cursor.com/agents?id=${encodeURIComponent(agentId)}`,
   ];
 }
 

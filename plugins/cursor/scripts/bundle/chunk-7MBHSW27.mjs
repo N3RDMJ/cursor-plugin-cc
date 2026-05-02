@@ -237,10 +237,7 @@ function formatJobActions(entry) {
   if (TERMINAL_STATUSES.has(entry.status)) {
     return `/cursor:result ${entry.id}`;
   }
-  if (entry.status === "running" || entry.status === "pending") {
-    return `/cursor:status ${entry.id} \u2022 /cursor:cancel ${entry.id}`;
-  }
-  return "";
+  return `/cursor:status ${entry.id} \u2022 /cursor:cancel ${entry.id}`;
 }
 function rowsFromJobs(jobs, now) {
   return jobs.map((job) => ({
@@ -269,6 +266,11 @@ function ageFromIso(iso, now = Date.now()) {
 }
 function escapeMarkdownCell(value) {
   return value.replace(/\|/g, "\\|");
+}
+function fenceCodeBlock(content) {
+  const longestRun = (content.match(/`+/g) ?? []).reduce((max, m) => Math.max(max, m.length), 0);
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  return [fence, content, fence];
 }
 function renderJobTable(jobs, now = Date.now()) {
   if (jobs.length === 0) return "_(no jobs)_\n";
@@ -327,8 +329,7 @@ function jobAgentHandoffLines(agentId) {
   if (!agentId) return [];
   return [
     `- Continue from Claude Code: \`/cursor:resume ${agentId}\``,
-    `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``,
-    `- Open in Cursor: https://cursor.com/agents?id=${encodeURIComponent(agentId)}`
+    `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``
   ];
 }
 function renderError(error) {
@@ -598,6 +599,7 @@ export {
   formatJobActions,
   ageFromIso,
   escapeMarkdownCell,
+  fenceCodeBlock,
   renderJobTable,
   renderReviewResult,
   jobAgentHandoffLines,

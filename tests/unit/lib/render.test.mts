@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../../../plugins/cursor/scripts/lib/cursor-agent.mjs";
 import {
   compactText,
+  fenceCodeBlock,
   formatDuration,
+  jobAgentHandoffLines,
   type ReviewOutput,
   renderError,
   renderJobTable,
@@ -207,6 +209,30 @@ describe("renderReviewResult", () => {
       next_steps: [],
     });
     expect(out).toContain("**Findings:** _(none)_");
+  });
+});
+
+describe("fenceCodeBlock", () => {
+  it("uses a triple-backtick fence for plain content", () => {
+    expect(fenceCodeBlock("hello")).toEqual(["```", "hello", "```"]);
+  });
+
+  it("picks a longer fence when content contains a triple-backtick run", () => {
+    const out = fenceCodeBlock("before\n```\ninside\n```\nafter");
+    expect(out[0]).toBe("````");
+    expect(out[2]).toBe("````");
+  });
+});
+
+describe("jobAgentHandoffLines", () => {
+  it("returns an empty array when no agent id is present", () => {
+    expect(jobAgentHandoffLines(undefined)).toEqual([]);
+  });
+
+  it("surfaces both Claude Code and Cursor CLI continuations", () => {
+    const out = jobAgentHandoffLines("agent-abc");
+    expect(out).toContain("- Continue from Claude Code: `/cursor:resume agent-abc`");
+    expect(out).toContain("- Continue from the Cursor CLI: `cursor-agent resume agent-abc`");
   });
 });
 
