@@ -146,6 +146,7 @@ function renderJobDetail(job: ReturnType<typeof getJob>): string {
   lines.push(`id:         ${job.id}`);
   lines.push(`type:       ${job.type}`);
   lines.push(`status:     ${job.status}`);
+  if (job.phase) lines.push(`phase:      ${job.phase}`);
   lines.push(`createdAt:  ${job.createdAt}`);
   lines.push(`updatedAt:  ${job.updatedAt}`);
   if (job.startedAt) lines.push(`startedAt:  ${job.startedAt}`);

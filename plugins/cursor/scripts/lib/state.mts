@@ -21,6 +21,8 @@ export interface JobIndexEntry {
   createdAt: string;
   updatedAt: string;
   summary?: string;
+  /** Most recent task-event description ("what is it doing right now"). */
+  phase?: string;
 }
 
 export interface JobIndex {
@@ -43,6 +45,8 @@ export interface JobRecord {
   result?: string;
   error?: string;
   metadata?: Record<string, unknown>;
+  /** Most recent task-event description ("what is it doing right now"). */
+  phase?: string;
 }
 
 export interface SessionState {

@@ -159,11 +159,12 @@ export interface JobTableRow {
   id: string;
   type: string;
   status: string;
+  phase: string;
   age: string;
   summary: string;
 }
 
-const TABLE_HEADERS: Array<keyof JobTableRow> = ["id", "type", "status", "age", "summary"];
+const TABLE_HEADERS: Array<keyof JobTableRow> = ["id", "type", "status", "phase", "age", "summary"];
 
 function rowsFromJobs(jobs: JobIndexEntry[], now: number): JobTableRow[] {
   return jobs.map((job) => {
@@ -173,6 +174,7 @@ function rowsFromJobs(jobs: JobIndexEntry[], now: number): JobTableRow[] {
       id: job.id,
       type: job.type,
       status: job.status,
+      phase: job.phase ? compactText(job.phase).slice(0, 40) : "",
       age: formatAge(ageMs),
       summary: job.summary ? compactText(job.summary).slice(0, 60) : "",
     };
@@ -212,6 +214,7 @@ export function renderJobTable(jobs: JobIndexEntry[], now: number = Date.now()):
     id: "id".length,
     type: "type".length,
     status: "status".length,
+    phase: "phase".length,
     age: "age".length,
     summary: "summary".length,
   };

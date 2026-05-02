@@ -59,6 +59,7 @@ function indexEntry(record: JobRecord): JobIndexEntry {
       ? record.metadata.summary
       : summarize(record.prompt);
   if (summary) entry.summary = summary;
+  if (record.phase) entry.phase = record.phase;
   return entry;
 }
 
@@ -173,6 +174,7 @@ interface UpdateInput {
   result?: string;
   error?: string;
   metadata?: Record<string, unknown>;
+  phase?: string;
 }
 
 function update(stateDir: string, jobId: string, input: UpdateInput): JobRecord {
@@ -265,6 +267,29 @@ export function markFailed(stateDir: string, jobId: string, error: string): JobR
     finishedAt: nowIso(),
     error: redactApiKey(error),
   });
+}
+
+const PHASE_MAX_LENGTH = 80;
+
+function normalizePhase(raw: string): string {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (compact.length <= PHASE_MAX_LENGTH) return compact;
+  return `${compact.slice(0, PHASE_MAX_LENGTH - 3)}...`;
+}
+
+/**
+ * Stamp the most-recent task description onto the job record. No-ops when the
+ * phase is empty, unchanged, or the job is already terminal — task events fire
+ * frequently and we don't want to thrash the on-disk state files.
+ */
+export function markPhase(stateDir: string, jobId: string, phase: string): JobRecord | undefined {
+  const normalized = normalizePhase(phase);
+  if (!normalized) return undefined;
+  const existing = readJob(stateDir, jobId);
+  if (!existing) return undefined;
+  if (TERMINAL_STATUSES.has(existing.status)) return existing;
+  if (existing.phase === normalized) return existing;
+  return update(stateDir, jobId, { phase: normalized });
 }
 
 /** Mark a job as cancelled (without an associated Run). */
