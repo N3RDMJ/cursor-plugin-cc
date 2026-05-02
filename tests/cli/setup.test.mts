@@ -61,13 +61,13 @@ describe("CLI: setup", () => {
   it("reports gate state in the default report (off by default)", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup"), io)).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("Stop gate   off");
+    expect(io.captured.stdout.join("")).toContain("| Stop gate | off |");
   });
 
   it("--enable-gate persists enabled=true and reports 'on'", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup", "--enable-gate"), io)).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("Stop gate   on");
+    expect(io.captured.stdout.join("")).toContain("| Stop gate | on |");
     const cfg = readGateConfig(resolveStateDir(workDir));
     expect(cfg.enabled).toBe(true);
   });
@@ -77,7 +77,7 @@ describe("CLI: setup", () => {
     await companionMain(argv("setup", "--enable-gate"), ioOn);
     const ioOff = captureIO(workDir);
     expect(await companionMain(argv("setup", "--disable-gate"), ioOff)).toBe(0);
-    expect(ioOff.captured.stdout.join("")).toContain("Stop gate   off");
+    expect(ioOff.captured.stdout.join("")).toContain("| Stop gate | off |");
     expect(readGateConfig(resolveStateDir(workDir)).enabled).toBe(false);
   });
 
@@ -99,7 +99,7 @@ describe("CLI: setup", () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup"), io)).toBe(0);
     const out = io.captured.stdout.join("");
-    expect(out).toContain("Default     composer-2");
+    expect(out).toContain("| Default | composer-2 |");
     expect(out).toContain("built-in fallback");
   });
 
@@ -108,7 +108,7 @@ describe("CLI: setup", () => {
     expect(await companionMain(argv("setup", "--set-model", "gpt-5"), io)).toBe(0);
     expect(readUserConfig().defaultModel).toEqual({ id: "gpt-5" });
     const out = io.captured.stdout.join("");
-    expect(out).toContain("Default     gpt-5");
+    expect(out).toContain("| Default | gpt-5 |");
     expect(out).toContain("from persisted default");
   });
 
@@ -144,14 +144,14 @@ describe("CLI: setup", () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup"), io)).toBe(0);
     const out = io.captured.stdout.join("");
-    expect(out).toContain("Default     composer-2");
+    expect(out).toContain("| Default | composer-2 |");
     expect(out).toContain("from CURSOR_MODEL env");
   });
 
   it("reports apiKey source as 'env' when using CURSOR_API_KEY", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup"), io)).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("(source: env)");
+    expect(io.captured.stdout.join("")).toContain("source: env");
   });
 
   it("--json report includes apiKey.source", async () => {

@@ -34,7 +34,7 @@ describe("CLI: status --wait", () => {
       io,
     );
     expect(code).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("status:     failed");
+    expect(io.captured.stdout.join("")).toContain("| status | `failed` |");
   });
 
   it("polls until the job becomes terminal", async () => {
@@ -52,7 +52,7 @@ describe("CLI: status --wait", () => {
       io,
     );
     expect(code).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("status:     failed");
+    expect(io.captured.stdout.join("")).toContain("| status | `failed` |");
   });
 
   it("times out and returns 1 when the job stays non-terminal", async () => {
@@ -67,7 +67,7 @@ describe("CLI: status --wait", () => {
     );
     expect(code).toBe(1);
     expect(io.captured.stderr.join("")).toContain("status --wait timed out");
-    expect(io.captured.stdout.join("")).toContain("status:     running");
+    expect(io.captured.stdout.join("")).toContain("| status | `running` |");
   });
 
   it("includes a progress tail for a non-terminal job", async () => {
@@ -82,7 +82,7 @@ describe("CLI: status --wait", () => {
     const code = await companionMain(argv("status", job.id), io);
     expect(code).toBe(0);
     const out = io.captured.stdout.join("");
-    expect(out).toContain("progress:");
+    expect(out).toContain("**Progress**");
     expect(out).toContain("fetching repo");
     expect(out).toContain("step five");
   });
@@ -96,7 +96,7 @@ describe("CLI: status --wait", () => {
     const io = captureIO(workDir);
     const code = await companionMain(argv("status", job.id), io);
     expect(code).toBe(0);
-    expect(io.captured.stdout.join("")).not.toContain("progress:");
+    expect(io.captured.stdout.join("")).not.toContain("**Progress**");
   });
 
   it("includes the progress tail when --wait times out on a running job", async () => {
@@ -112,7 +112,7 @@ describe("CLI: status --wait", () => {
     );
     expect(code).toBe(1);
     const out = io.captured.stdout.join("");
-    expect(out).toContain("progress:");
+    expect(out).toContain("**Progress**");
     expect(out).toContain("still cooking");
   });
 

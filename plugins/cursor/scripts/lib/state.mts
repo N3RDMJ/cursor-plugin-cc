@@ -20,6 +20,10 @@ export interface JobIndexEntry {
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
+  /** Stamped when the run starts — used to compute elapsed/duration in the table. */
+  startedAt?: string;
+  /** Stamped when the job reaches a terminal state — used to compute duration. */
+  finishedAt?: string;
   summary?: string;
   /** Most recent task-event description ("what is it doing right now"). */
   phase?: string;

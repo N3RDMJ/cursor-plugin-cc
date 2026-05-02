@@ -3,7 +3,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { getJob, type ListJobsFilter, listJobs, reconcileStaleJobs } from "../lib/job-control.mjs";
-import { renderJobTable } from "../lib/render.mjs";
+import { formatJobActions, jobAgentHandoffLines, renderJobTable } from "../lib/render.mjs";
 import { type JobStatus, type JobType, resolveStateDir, tailJobLog } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
@@ -144,32 +144,60 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
 function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): string {
   if (!job) return "";
   const lines: string[] = [];
-  lines.push(`id:         ${job.id}`);
-  lines.push(`type:       ${job.type}`);
-  lines.push(`status:     ${job.status}`);
-  if (job.phase) lines.push(`phase:      ${job.phase}`);
-  lines.push(`createdAt:  ${job.createdAt}`);
-  lines.push(`updatedAt:  ${job.updatedAt}`);
-  if (job.startedAt) lines.push(`startedAt:  ${job.startedAt}`);
-  if (job.finishedAt) lines.push(`finishedAt: ${job.finishedAt}`);
-  if (typeof job.durationMs === "number") lines.push(`durationMs: ${job.durationMs}`);
-  if (job.agentId) lines.push(`agentId:    ${job.agentId}`);
-  if (job.runId) lines.push(`runId:      ${job.runId}`);
+  lines.push(`# Job \`${job.id}\``);
+  lines.push("");
+  lines.push("| Field | Value |");
+  lines.push("| --- | --- |");
+  const row = (label: string, value: string): void => {
+    lines.push(`| ${label} | ${value.replace(/\|/g, "\\|")} |`);
+  };
+  row("id", `\`${job.id}\``);
+  row("type", `\`${job.type}\``);
+  row("status", `\`${job.status}\``);
+  if (job.phase) row("phase", job.phase);
+  row("createdAt", job.createdAt);
+  row("updatedAt", job.updatedAt);
+  if (job.startedAt) row("startedAt", job.startedAt);
+  if (job.finishedAt) row("finishedAt", job.finishedAt);
+  if (typeof job.durationMs === "number") row("durationMs", String(job.durationMs));
+  if (job.agentId) row("agentId", `\`${job.agentId}\``);
+  if (job.runId) row("runId", `\`${job.runId}\``);
   if (job.metadata && Object.keys(job.metadata).length > 0) {
-    lines.push(`metadata:   ${JSON.stringify(job.metadata)}`);
+    row("metadata", `\`${JSON.stringify(job.metadata)}\``);
   }
+  const actions = formatJobActions({
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+  if (actions) row("actions", actions);
+
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    lines.push("", "**Continue this Cursor agent:**", ...handoff);
+  }
+
   if (job.error) {
-    lines.push("", "error:", job.error);
+    lines.push("", "**Error:**", "", "```", job.error, "```");
   }
   if (job.prompt) {
-    lines.push("", "prompt:", job.prompt);
+    lines.push("", "**Prompt:**", "", "```", job.prompt, "```");
   }
   // Surface a tail of the streaming log for non-terminal jobs so users can
   // peek at progress without `result --log`.
   if (!TERMINAL_STATUSES.has(job.status)) {
     const tail = tailJobLog(stateDir, job.id, PROGRESS_TAIL_LINES);
     if (tail) {
-      lines.push("", `progress: (last ${PROGRESS_TAIL_LINES} log lines)`, tail);
+      lines.push(
+        "",
+        `**Progress** _(last ${PROGRESS_TAIL_LINES} log lines)_:`,
+        "",
+        "```",
+        tail,
+        "```",
+      );
     }
   }
   return `${lines.join("\n")}\n`;

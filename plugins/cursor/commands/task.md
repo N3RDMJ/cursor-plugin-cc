@@ -2,6 +2,7 @@
 description: Delegate investigation, an explicit fix request, or follow-up task to a Cursor agent
 argument-hint: "[--background|--wait] [--resume-last|--fresh] [--model <id>] [--write] [what Cursor should investigate, solve, or continue]"
 allowed-tools: Bash(node:*), AskUserQuestion, Agent
+disable-model-invocation: true
 ---
 
 Invoke the `cursor:cursor-rescue` subagent via the `Agent` tool (`subagent_type: "cursor:cursor-rescue"`), forwarding the raw user request as the prompt.

@@ -119,17 +119,19 @@ describe("renderStreamEvent", () => {
 
 describe("renderJobTable", () => {
   it("returns a hint when there are no jobs", () => {
-    expect(renderJobTable([])).toBe("(no jobs)\n");
+    expect(renderJobTable([])).toBe("_(no jobs)_\n");
   });
 
-  it("renders aligned columns with derived ages", () => {
+  it("renders a Markdown table with elapsed/duration and an actions hint", () => {
     const now = new Date("2026-04-29T12:00:00Z").getTime();
     const jobs: JobIndexEntry[] = [
       {
         id: "abc123",
         type: "task",
         status: "completed",
-        createdAt: new Date(now - 30_000).toISOString(),
+        createdAt: new Date(now - 60_000).toISOString(),
+        startedAt: new Date(now - 55_000).toISOString(),
+        finishedAt: new Date(now - 30_000).toISOString(),
         updatedAt: new Date(now - 30_000).toISOString(),
         summary: "hello",
       },
@@ -138,17 +140,22 @@ describe("renderJobTable", () => {
         type: "review",
         status: "running",
         createdAt: new Date(now - 3_600_000).toISOString(),
-        updatedAt: new Date(now - 3_600_000).toISOString(),
+        startedAt: new Date(now - 3_540_000).toISOString(),
+        updatedAt: new Date(now - 3_540_000).toISOString(),
         phase: "investigating auth flow",
       },
     ];
     const out = renderJobTable(jobs, now);
-    expect(out).toContain("ID");
-    expect(out).toContain("STATUS");
-    expect(out).toContain("PHASE");
+    expect(
+      out.startsWith("| ID | Type | Status | Phase | Elapsed/Duration | Summary | Actions |"),
+    ).toBe(true);
+    expect(out).toContain("| --- |");
     expect(out).toContain("abc123");
-    expect(out).toContain("30s");
-    expect(out).toContain("1h");
+    expect(out).toContain("duration: 25s");
+    expect(out).toContain("elapsed: 59m");
+    expect(out).toContain("/cursor:result abc123");
+    expect(out).toContain("/cursor:status def456");
+    expect(out).toContain("/cursor:cancel def456");
     expect(out).toContain("investigating auth flow");
   });
 });
@@ -183,12 +190,12 @@ describe("renderReviewResult", () => {
       next_steps: ["fix auth", "rename foo"],
     };
     const out = renderReviewResult(review);
-    expect(out).toContain("verdict: needs-attention");
-    expect(out).toContain("findings: 2");
+    expect(out).toContain("**Verdict:** `needs-attention`");
+    expect(out).toContain("**Findings:** 2");
     expect(out.indexOf("[CRITICAL]")).toBeLessThan(out.indexOf("[LOW]"));
-    expect(out).toContain("src/auth.ts:1-4");
-    expect(out).toContain("src/foo.ts:10");
-    expect(out).toContain("→ add guard");
+    expect(out).toContain("`src/auth.ts:1-4`");
+    expect(out).toContain("`src/foo.ts:10`");
+    expect(out).toContain("**Recommendation:** add guard");
     expect(out).toContain("- fix auth");
   });
 
@@ -199,7 +206,7 @@ describe("renderReviewResult", () => {
       findings: [],
       next_steps: [],
     });
-    expect(out).toContain("findings: (none)");
+    expect(out).toContain("**Findings:** _(none)_");
   });
 });
 

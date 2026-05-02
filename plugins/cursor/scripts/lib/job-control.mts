@@ -54,6 +54,8 @@ function indexEntry(record: JobRecord): JobIndexEntry {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
+  if (record.startedAt) entry.startedAt = record.startedAt;
+  if (record.finishedAt) entry.finishedAt = record.finishedAt;
   const summary =
     record.metadata && typeof record.metadata.summary === "string"
       ? record.metadata.summary

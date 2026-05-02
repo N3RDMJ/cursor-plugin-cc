@@ -2,6 +2,7 @@
 description: Run a Cursor code review against local git state
 argument-hint: '[--wait|--background] [--base <ref>] [--staged] [--scope auto|working-tree|branch]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+disable-model-invocation: true
 ---
 
 Run a Cursor review through the shared plugin runtime.

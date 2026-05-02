@@ -1,58 +1,62 @@
 import {
-  DEFAULT_MODEL,
   UsageError,
   ageFromIso,
   bool,
+  compactText,
+  formatJobActions,
+  interpolateTemplate,
+  jobAgentHandoffLines,
+  loadPromptTemplate,
+  optionalString,
+  parseArgs,
+  readGateConfig,
+  renderError,
+  renderJobTable,
+  renderStreamEvent,
+  runReview,
+  setGateEnabled
+} from "./chunk-AM4UUQ4G.mjs";
+import {
+  DEFAULT_MODEL,
   buildAgentOptionsFromFlags,
   cancelJob,
   clearDefaultModel,
-  compactText,
   createAgent,
   createJob,
   deleteApiKey,
   detectBackend,
   disposeAgent,
+  ensureStateDir,
   findRecentTaskAgents,
   getBranch,
   getJob,
   getRecentCommits,
   getSourceTree,
-  interpolateTemplate,
   listJobs,
   listModels,
   listRemoteAgents,
-  loadPromptTemplate,
   logJobLine,
   markFailed,
   markFinished,
+  markPhase,
   markRunning,
-  optionalString,
-  parseArgs,
-  readGateConfig,
+  readJobLog,
   reconcileStaleJobs,
   registerActiveRun,
-  renderError,
-  renderJobTable,
-  renderStreamEvent,
   resolveApiKey,
   resolveDefaultModel,
+  resolveStateDir,
+  resolveWorkspaceRoot,
   resumeAgent,
-  runReview,
   sendTask,
   setDefaultModel,
-  setGateEnabled,
   storeApiKey,
+  tailJobLog,
   toAgentEvents,
   unregisterActiveRun,
   validateModel,
   whoami
-} from "./chunk-3UE6KZBM.mjs";
-import {
-  ensureStateDir,
-  readJobLog,
-  resolveStateDir,
-  resolveWorkspaceRoot
-} from "./chunk-PI7XIE4N.mjs";
+} from "./chunk-3Z37EVW4.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -92,11 +96,14 @@ async function runCancel(args, io) {
 }
 
 // plugins/cursor/scripts/commands/result.mts
-var HELP2 = `cursor-companion result <job-id> [--log] [--json] [--help]
+var HELP2 = `cursor-companion result [<job-id>] [--log] [--json] [--help]
 
-Print a completed job's result text. With --log, print the streaming log
-captured while the run was alive. With --json, emit the full JobRecord.
+Print a completed job's result text. Without a job id, defaults to the most
+recent terminal job for the current workspace. With --log, print the
+streaming log captured while the run was alive. With --json, emit the full
+JobRecord.
 `;
+var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 async function runResult(args, io) {
   const parsed = parseArgs(args, {
     long: { log: "boolean", json: "boolean", help: "boolean" },
@@ -106,11 +113,18 @@ async function runResult(args, io) {
     io.stdout.write(HELP2);
     return 0;
   }
-  const jobId = parsed.positionals[0];
-  if (!jobId) throw new UsageError("result requires a job id");
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = resolveStateDir(workspaceRoot);
+  let jobId = parsed.positionals[0];
+  if (!jobId) {
+    const recent = listJobs(stateDir).find((j) => TERMINAL_STATUSES.has(j.status));
+    if (!recent) {
+      io.stderr.write("no terminal jobs in this workspace yet \u2014 pass a job id\n");
+      return 1;
+    }
+    jobId = recent.id;
+  }
   const job = getJob(stateDir, jobId);
   if (!job) {
     io.stderr.write(`job not found: ${jobId}
@@ -142,10 +156,22 @@ async function runResult(args, io) {
   }
   io.stdout.write(job.result);
   if (!job.result.endsWith("\n")) io.stdout.write("\n");
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    io.stderr.write(`
+Continue this Cursor agent:
+${handoff.join("\n")}
+`);
+  }
   return 0;
 }
 
 // plugins/cursor/scripts/lib/run-agent-task.mts
+function phaseFromEvent(event) {
+  if (event.type !== "task") return void 0;
+  const candidate = event.text ?? event.status;
+  return candidate && candidate.trim() !== "" ? candidate : void 0;
+}
 async function runAgentTaskForeground(opts) {
   const { agent, prompt, flags, io, stateDir, jobId } = opts;
   try {
@@ -158,6 +184,8 @@ async function runAgentTaskForeground(opts) {
       },
       onEvent: (event) => {
         for (const ae of toAgentEvents(event)) {
+          const phase = phaseFromEvent(ae);
+          if (phase) markPhase(stateDir, jobId, phase);
           const rendered = renderStreamEvent(ae, { quietStatus: true, quietThinking: true });
           if (rendered.stdout) io.stdout.write(rendered.stdout);
           if (rendered.stderr) {
@@ -196,6 +224,8 @@ function runAgentTaskBackground(opts) {
         },
         onEvent: (event) => {
           for (const ae of toAgentEvents(event)) {
+            const phase = phaseFromEvent(ae);
+            if (phase) markPhase(stateDir, jobId, phase);
             const rendered = renderStreamEvent(ae);
             if (rendered.stdout) logJobLine(stateDir, jobId, rendered.stdout.replace(/\n$/, ""));
             if (rendered.stderr) logJobLine(stateDir, jobId, rendered.stderr.replace(/\n$/, ""));
@@ -552,31 +582,43 @@ async function buildReport(input) {
   }
   return report;
 }
+function escapeMarkdownCell(value) {
+  return value.replace(/\|/g, "\\|");
+}
 function renderReport(report) {
   const lines = [];
   const yes = (ok) => ok ? "ok" : "fail";
-  lines.push(`Node.js     ${yes(report.node.ok)}  (${report.node.version})`);
-  const keyDetail = report.apiKey.ok ? `  (source: ${report.apiKey.source})` : report.apiKey.error ? `  ${report.apiKey.error}` : "";
-  lines.push(`API key     ${yes(report.apiKey.ok)}${keyDetail}`);
+  lines.push("# Cursor Setup");
+  lines.push("");
+  lines.push("| Check | Result | Detail |");
+  lines.push("| --- | --- | --- |");
+  const row = (label, result, detail) => {
+    lines.push(
+      `| ${escapeMarkdownCell(label)} | ${escapeMarkdownCell(result)} | ${escapeMarkdownCell(detail)} |`
+    );
+  };
+  row("Node.js", yes(report.node.ok), report.node.version);
+  const keyDetail = report.apiKey.ok ? `source: ${report.apiKey.source}` : report.apiKey.error ?? "";
+  row("API key", yes(report.apiKey.ok), keyDetail);
   if (report.account.ok) {
-    lines.push(`Account     ok    (key: ${report.account.apiKeyName ?? "?"})`);
+    row("Account", "ok", `key: ${report.account.apiKeyName ?? "?"}`);
   } else if (report.account.error) {
-    lines.push(`Account     fail  ${report.account.error}`);
+    row("Account", "fail", report.account.error);
   }
   if (report.models.ok) {
-    lines.push(`Models      ok    (${report.models.choices.length} available)`);
-    for (const choice of report.models.choices) {
-      lines.push(`  - ${choice.label}  [${choice.selection.id}]`);
-    }
+    row("Models", "ok", `${report.models.choices.length} available`);
   } else if (report.models.error) {
-    lines.push(`Models      fail  ${report.models.error}`);
+    row("Models", "fail", report.models.error);
   }
-  lines.push(
-    `Default     ${report.defaultModel.id}  (${describeSource(report.defaultModel.source)})`
-  );
-  lines.push(
-    `Stop gate   ${report.gate.enabled ? "on" : "off"}   (workspace: ${report.gate.workspaceRoot})`
-  );
+  row("Default", report.defaultModel.id, describeSource(report.defaultModel.source));
+  row("Stop gate", report.gate.enabled ? "on" : "off", `workspace: ${report.gate.workspaceRoot}`);
+  if (report.models.ok && report.models.choices.length > 0) {
+    lines.push("");
+    lines.push("**Available models:**");
+    for (const choice of report.models.choices) {
+      lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
+    }
+  }
   return `${lines.join("\n")}
 `;
 }
@@ -774,9 +816,10 @@ async function runSetup(args, io) {
 import { setTimeout as sleep } from "node:timers/promises";
 var VALID_TYPES = /* @__PURE__ */ new Set(["task", "review", "adversarial-review"]);
 var VALID_STATUSES = /* @__PURE__ */ new Set(["pending", "running", "completed", "failed", "cancelled"]);
-var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
+var TERMINAL_STATUSES2 = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 var DEFAULT_WAIT_TIMEOUT_MS = 24e4;
 var DEFAULT_WAIT_POLL_MS = 1e3;
+var PROGRESS_TAIL_LINES = 15;
 var HELP5 = `cursor-companion status [<job-id>] [flags]
 
 Show the job table for the current workspace, or detail for one job. With
@@ -833,23 +876,23 @@ async function runStatus(args, io) {
 `);
       return 1;
     }
-    if (wait && !TERMINAL_STATUSES.has(job.status)) {
+    if (wait && !TERMINAL_STATUSES2.has(job.status)) {
       const deadline = Date.now() + (timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS);
       const interval = pollMs ?? DEFAULT_WAIT_POLL_MS;
       while (Date.now() < deadline) {
         await sleep(interval);
         const fresh = getJob(stateDir, jobId);
         if (fresh) job = fresh;
-        if (TERMINAL_STATUSES.has(job.status)) break;
+        if (TERMINAL_STATUSES2.has(job.status)) break;
       }
-      if (!TERMINAL_STATUSES.has(job.status)) {
+      if (!TERMINAL_STATUSES2.has(job.status)) {
         io.stderr.write(`status --wait timed out (job still ${job.status})
 `);
         if (json) {
           io.stdout.write(`${JSON.stringify(job, null, 2)}
 `);
         } else {
-          io.stdout.write(renderJobDetail(job));
+          io.stdout.write(renderJobDetail(job, stateDir));
         }
         return 1;
       }
@@ -858,7 +901,7 @@ async function runStatus(args, io) {
       io.stdout.write(`${JSON.stringify(job, null, 2)}
 `);
     } else {
-      io.stdout.write(renderJobDetail(job));
+      io.stdout.write(renderJobDetail(job, stateDir));
     }
     return 0;
   }
@@ -899,27 +942,60 @@ async function runStatus(args, io) {
   }
   return 0;
 }
-function renderJobDetail(job) {
+function renderJobDetail(job, stateDir) {
   if (!job) return "";
   const lines = [];
-  lines.push(`id:         ${job.id}`);
-  lines.push(`type:       ${job.type}`);
-  lines.push(`status:     ${job.status}`);
-  lines.push(`createdAt:  ${job.createdAt}`);
-  lines.push(`updatedAt:  ${job.updatedAt}`);
-  if (job.startedAt) lines.push(`startedAt:  ${job.startedAt}`);
-  if (job.finishedAt) lines.push(`finishedAt: ${job.finishedAt}`);
-  if (typeof job.durationMs === "number") lines.push(`durationMs: ${job.durationMs}`);
-  if (job.agentId) lines.push(`agentId:    ${job.agentId}`);
-  if (job.runId) lines.push(`runId:      ${job.runId}`);
+  lines.push(`# Job \`${job.id}\``);
+  lines.push("");
+  lines.push("| Field | Value |");
+  lines.push("| --- | --- |");
+  const row = (label, value) => {
+    lines.push(`| ${label} | ${value.replace(/\|/g, "\\|")} |`);
+  };
+  row("id", `\`${job.id}\``);
+  row("type", `\`${job.type}\``);
+  row("status", `\`${job.status}\``);
+  if (job.phase) row("phase", job.phase);
+  row("createdAt", job.createdAt);
+  row("updatedAt", job.updatedAt);
+  if (job.startedAt) row("startedAt", job.startedAt);
+  if (job.finishedAt) row("finishedAt", job.finishedAt);
+  if (typeof job.durationMs === "number") row("durationMs", String(job.durationMs));
+  if (job.agentId) row("agentId", `\`${job.agentId}\``);
+  if (job.runId) row("runId", `\`${job.runId}\``);
   if (job.metadata && Object.keys(job.metadata).length > 0) {
-    lines.push(`metadata:   ${JSON.stringify(job.metadata)}`);
+    row("metadata", `\`${JSON.stringify(job.metadata)}\``);
+  }
+  const actions = formatJobActions({
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt
+  });
+  if (actions) row("actions", actions);
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    lines.push("", "**Continue this Cursor agent:**", ...handoff);
   }
   if (job.error) {
-    lines.push("", "error:", job.error);
+    lines.push("", "**Error:**", "", "```", job.error, "```");
   }
   if (job.prompt) {
-    lines.push("", "prompt:", job.prompt);
+    lines.push("", "**Prompt:**", "", "```", job.prompt, "```");
+  }
+  if (!TERMINAL_STATUSES2.has(job.status)) {
+    const tail = tailJobLog(stateDir, job.id, PROGRESS_TAIL_LINES);
+    if (tail) {
+      lines.push(
+        "",
+        `**Progress** _(last ${PROGRESS_TAIL_LINES} log lines)_:`,
+        "",
+        "```",
+        tail,
+        "```"
+      );
+    }
   }
   return `${lines.join("\n")}
 `;

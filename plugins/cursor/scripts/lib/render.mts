@@ -160,25 +160,89 @@ export interface JobTableRow {
   type: string;
   status: string;
   phase: string;
-  age: string;
+  /** "elapsed" for active jobs, "duration" for terminal jobs, age fallback otherwise. */
+  time: string;
   summary: string;
+  /** Suggested next slash command for this row (e.g. `/cursor:result <id>`). */
+  actions: string;
 }
 
-const TABLE_HEADERS: Array<keyof JobTableRow> = ["id", "type", "status", "phase", "age", "summary"];
+const TABLE_HEADERS: Array<{ key: keyof JobTableRow; label: string }> = [
+  { key: "id", label: "ID" },
+  { key: "type", label: "Type" },
+  { key: "status", label: "Status" },
+  { key: "phase", label: "Phase" },
+  { key: "time", label: "Elapsed/Duration" },
+  { key: "summary", label: "Summary" },
+  { key: "actions", label: "Actions" },
+];
+
+const TERMINAL_STATUSES_FOR_RENDER: ReadonlySet<string> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+/**
+ * Compact duration label for the table's time column. Picks between elapsed
+ * (active) and duration (terminal) and falls back to created-at age when the
+ * status timestamps haven't been recorded yet.
+ *
+ * - Terminal job with start+finish: `duration: 3.4s`
+ * - Running job with start:         `elapsed:  42s`
+ * - Pending or otherwise:           `age:      <created→now>`
+ */
+export function formatJobTime(entry: JobIndexEntry, now: number): string {
+  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+    const start = entry.startedAt ? Date.parse(entry.startedAt) : Number.NaN;
+    const finish = entry.finishedAt ? Date.parse(entry.finishedAt) : Number.NaN;
+    if (Number.isFinite(start) && Number.isFinite(finish) && finish >= start) {
+      return `duration: ${formatAge(finish - start)}`;
+    }
+    // Fall back to created→updated as a coarse duration.
+    const created = Date.parse(entry.createdAt);
+    const updated = Date.parse(entry.updatedAt);
+    if (Number.isFinite(created) && Number.isFinite(updated) && updated >= created) {
+      return `duration: ${formatAge(updated - created)}`;
+    }
+    return "duration: ?";
+  }
+  if (entry.status === "running" && entry.startedAt) {
+    const start = Date.parse(entry.startedAt);
+    if (Number.isFinite(start)) {
+      return `elapsed: ${formatAge(now - start)}`;
+    }
+  }
+  const created = Date.parse(entry.createdAt);
+  const ageMs = Number.isFinite(created) ? now - created : 0;
+  return `age: ${formatAge(ageMs)}`;
+}
+
+/**
+ * Suggest the most useful next slash command for a job row. Mirrors the
+ * "actions" column codex-plugin-cc surfaces — keeps newcomers from having to
+ * dig through `/help` to discover follow-ups.
+ */
+export function formatJobActions(entry: JobIndexEntry): string {
+  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+    return `/cursor:result ${entry.id}`;
+  }
+  if (entry.status === "running" || entry.status === "pending") {
+    return `/cursor:status ${entry.id} • /cursor:cancel ${entry.id}`;
+  }
+  return "";
+}
 
 function rowsFromJobs(jobs: JobIndexEntry[], now: number): JobTableRow[] {
-  return jobs.map((job) => {
-    const created = Date.parse(job.createdAt);
-    const ageMs = Number.isFinite(created) ? now - created : 0;
-    return {
-      id: job.id,
-      type: job.type,
-      status: job.status,
-      phase: job.phase ? compactText(job.phase).slice(0, 40) : "",
-      age: formatAge(ageMs),
-      summary: job.summary ? compactText(job.summary).slice(0, 60) : "",
-    };
-  });
+  return jobs.map((job) => ({
+    id: job.id,
+    type: job.type,
+    status: job.status,
+    phase: job.phase ? compactText(job.phase).slice(0, 40) : "",
+    time: formatJobTime(job, now),
+    summary: job.summary ? compactText(job.summary).slice(0, 60) : "",
+    actions: formatJobActions(job),
+  }));
 }
 
 /**
@@ -203,30 +267,22 @@ export function ageFromIso(iso: string, now: number = Date.now()): string {
   return Number.isFinite(t) ? formatAge(now - t) : "?";
 }
 
+/** Escape a `|` so a value can sit inside a Markdown table cell without breaking it. */
+function escapeMd(value: string): string {
+  return value.replace(/\|/g, "\\|");
+}
+
 /**
- * Render a job-index list as an aligned text table. No color, no Unicode box
- * drawing — keeps output stable in CI logs and terminals without ANSI support.
+ * Render a job-index list as a Markdown table. Claude Code's terminal renderer
+ * styles the result; the `--json` path stays unaffected.
  */
 export function renderJobTable(jobs: JobIndexEntry[], now: number = Date.now()): string {
-  if (jobs.length === 0) return "(no jobs)\n";
+  if (jobs.length === 0) return "_(no jobs)_\n";
   const rows = rowsFromJobs(jobs, now);
-  const widths: Record<keyof JobTableRow, number> = {
-    id: "id".length,
-    type: "type".length,
-    status: "status".length,
-    phase: "phase".length,
-    age: "age".length,
-    summary: "summary".length,
-  };
-  for (const r of rows) {
-    for (const key of TABLE_HEADERS) {
-      widths[key] = Math.max(widths[key], r[key].length);
-    }
-  }
-  const header = TABLE_HEADERS.map((k) => k.toUpperCase().padEnd(widths[k])).join("  ");
-  const separator = TABLE_HEADERS.map((k) => "-".repeat(widths[k])).join("  ");
+  const header = `| ${TABLE_HEADERS.map((h) => h.label).join(" | ")} |`;
+  const separator = `| ${TABLE_HEADERS.map(() => "---").join(" | ")} |`;
   const body = rows
-    .map((r) => TABLE_HEADERS.map((k) => r[k].padEnd(widths[k])).join("  "))
+    .map((r) => `| ${TABLE_HEADERS.map((h) => escapeMd(r[h.key] ?? "")).join(" | ")} |`)
     .join("\n");
   return `${header}\n${separator}\n${body}\n`;
 }
@@ -264,12 +320,13 @@ const SEVERITY_ORDER: Record<ReviewSeverity, number> = {
 };
 
 /**
- * Format a structured review for terminal display. Findings sorted by
- * severity then file. No ANSI color — callers can wrap output if they need it.
+ * Format a structured review as Markdown. Findings sorted by severity then
+ * file. Slash commands render through Claude Code's Markdown pipeline, so the
+ * verdict and findings get emphasis styling automatically.
  */
 export function renderReviewResult(review: ReviewOutput): string {
   const lines: string[] = [];
-  lines.push(`verdict: ${review.verdict}`);
+  lines.push(`**Verdict:** \`${review.verdict}\``);
   if (review.summary) lines.push("", review.summary);
 
   const findings = [...review.findings].sort((a, b) => {
@@ -279,29 +336,53 @@ export function renderReviewResult(review: ReviewOutput): string {
   });
 
   if (findings.length === 0) {
-    lines.push("", "findings: (none)");
+    lines.push("", "**Findings:** _(none)_");
   } else {
-    lines.push("", `findings: ${findings.length}`);
+    lines.push("", `**Findings:** ${findings.length}`);
     for (const f of findings) {
       const loc =
         f.line_start === f.line_end
-          ? `${f.file}:${f.line_start}`
-          : `${f.file}:${f.line_start}-${f.line_end}`;
-      const conf = Number.isFinite(f.confidence) ? `(confidence ${f.confidence.toFixed(2)})` : "";
-      lines.push("", `[${f.severity.toUpperCase()}] ${f.title} — ${loc} ${conf}`.trim(), f.body);
+          ? `\`${f.file}:${f.line_start}\``
+          : `\`${f.file}:${f.line_start}-${f.line_end}\``;
+      const conf = Number.isFinite(f.confidence)
+        ? ` _(confidence ${f.confidence.toFixed(2)})_`
+        : "";
+      lines.push(
+        "",
+        `### [${f.severity.toUpperCase()}] ${f.title} — ${loc}${conf}`.trim(),
+        "",
+        f.body,
+      );
       if (f.recommendation) {
-        lines.push(`  → ${f.recommendation}`);
+        lines.push("", `**Recommendation:** ${f.recommendation}`);
       }
     }
   }
 
   if (review.next_steps.length > 0) {
-    lines.push("", "next steps:");
+    lines.push("", "**Next steps:**");
     for (const step of review.next_steps) {
-      lines.push(`  - ${step}`);
+      lines.push(`- ${step}`);
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Build the "continue this thread" hint we surface alongside a job's
+ * `agentId`. Returns an empty array when there is no agent to resume so
+ * callers can splice the result directly into a line list.
+ *
+ * The deep link points at Cursor's web agent dashboard. If/when the SDK
+ * exposes a richer scheme (e.g. `cursor://agent/<id>`), swap it in here.
+ */
+export function jobAgentHandoffLines(agentId: string | undefined): string[] {
+  if (!agentId) return [];
+  return [
+    `- Continue from Claude Code: \`/cursor:resume ${agentId}\``,
+    `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``,
+    `- Open in Cursor: https://cursor.com/agents?id=${encodeURIComponent(agentId)}`,
+  ];
 }
 
 /**

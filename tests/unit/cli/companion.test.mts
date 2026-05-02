@@ -34,16 +34,47 @@ describe("cursor-companion router", () => {
     expect(io.captured.stderr.join("")).toContain("unknown command");
   });
 
-  it("status with no jobs prints '(no jobs)'", async () => {
+  it("status with no jobs prints '_(no jobs)_'", async () => {
     const io = captureIO(workDir);
     expect(await companionMain(argv("status"), io)).toBe(0);
-    expect(io.captured.stdout.join("")).toContain("(no jobs)");
+    expect(io.captured.stdout.join("")).toContain("_(no jobs)_");
   });
 
-  it("result with missing job id exits 2 (UsageError)", async () => {
+  it("result without a job id and no terminal jobs exits 1 with a hint", async () => {
     const io = captureIO(workDir);
-    expect(await companionMain(argv("result"), io)).toBe(2);
-    expect(io.captured.stderr.join("")).toContain("error: result requires a job id");
+    expect(await companionMain(argv("result"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("no terminal jobs");
+  });
+
+  it("result without a job id resolves to the most recent terminal job", async () => {
+    const { createJob, markFailed, markFinished, markRunning } = await import(
+      "../../../plugins/cursor/scripts/lib/job-control.mjs"
+    );
+    const { ensureStateDir, resolveStateDir } = await import(
+      "../../../plugins/cursor/scripts/lib/state.mjs"
+    );
+    const sd = ensureStateDir(resolveStateDir(workDir));
+    const a = createJob(sd, { type: "task", prompt: "first" });
+    markRunning(sd, a.id, { agentId: "agent-a", runId: "run-a" });
+    markFinished(sd, a.id, {
+      status: "finished",
+      output: "first result\n",
+      toolCalls: [],
+      agentId: "agent-a",
+      runId: "run-a",
+      durationMs: 1000,
+    });
+
+    const b = createJob(sd, { type: "task", prompt: "second" });
+    markRunning(sd, b.id, { agentId: "agent-b", runId: "run-b" });
+    markFailed(sd, b.id, "boom");
+
+    const stillRunning = createJob(sd, { type: "task", prompt: "running" });
+    markRunning(sd, stillRunning.id, { agentId: "agent-r", runId: "run-r" });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("result"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("job failed: boom");
   });
 
   it("cancel without a job id exits 2 (UsageError)", async () => {

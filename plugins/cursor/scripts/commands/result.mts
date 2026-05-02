@@ -1,14 +1,19 @@
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, parseArgs, UsageError } from "../lib/args.mjs";
-import { getJob } from "../lib/job-control.mjs";
-import { readJobLog, resolveStateDir } from "../lib/state.mjs";
+import { bool, parseArgs } from "../lib/args.mjs";
+import { getJob, listJobs } from "../lib/job-control.mjs";
+import { jobAgentHandoffLines } from "../lib/render.mjs";
+import { type JobStatus, readJobLog, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
-const HELP = `cursor-companion result <job-id> [--log] [--json] [--help]
+const HELP = `cursor-companion result [<job-id>] [--log] [--json] [--help]
 
-Print a completed job's result text. With --log, print the streaming log
-captured while the run was alive. With --json, emit the full JobRecord.
+Print a completed job's result text. Without a job id, defaults to the most
+recent terminal job for the current workspace. With --log, print the
+streaming log captured while the run was alive. With --json, emit the full
+JobRecord.
 `;
+
+const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed", "cancelled"]);
 
 export async function runResult(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   const parsed = parseArgs(args, {
@@ -20,12 +25,19 @@ export async function runResult(args: readonly string[], io: CommandIO): Promise
     return 0;
   }
 
-  const jobId = parsed.positionals[0];
-  if (!jobId) throw new UsageError("result requires a job id");
-
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = resolveStateDir(workspaceRoot);
+
+  let jobId = parsed.positionals[0];
+  if (!jobId) {
+    const recent = listJobs(stateDir).find((j) => TERMINAL_STATUSES.has(j.status));
+    if (!recent) {
+      io.stderr.write("no terminal jobs in this workspace yet — pass a job id\n");
+      return 1;
+    }
+    jobId = recent.id;
+  }
 
   const job = getJob(stateDir, jobId);
   if (!job) {
@@ -56,5 +68,11 @@ export async function runResult(args: readonly string[], io: CommandIO): Promise
   }
   io.stdout.write(job.result);
   if (!job.result.endsWith("\n")) io.stdout.write("\n");
+  // Surface handoff hints on stderr so the result text on stdout stays
+  // clean for downstream consumers (pipes, --json, programmatic callers).
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    io.stderr.write(`\nContinue this Cursor agent:\n${handoff.join("\n")}\n`);
+  }
   return 0;
 }
