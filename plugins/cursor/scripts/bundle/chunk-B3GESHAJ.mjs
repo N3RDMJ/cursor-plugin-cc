@@ -1,101 +1,3 @@
-import {
-  appendJobLog,
-  ensureStateDir,
-  jobLogMtimeMs,
-  readJob,
-  readJson,
-  readStateIndex,
-  resolveStateDir,
-  resolveStateRoot,
-  resolveWorkspaceRoot,
-  writeJob,
-  writeJsonAtomic,
-  writeStateIndex
-} from "./chunk-PI7XIE4N.mjs";
-
-// plugins/cursor/scripts/lib/args.mts
-var UsageError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "UsageError";
-  }
-};
-function parseArgs(argv, spec = {}) {
-  const long = spec.long ?? {};
-  const short = spec.short ?? {};
-  const flags = {};
-  const positionals = [];
-  let stopParsing = false;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === void 0) continue;
-    if (stopParsing) {
-      positionals.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      stopParsing = true;
-      continue;
-    }
-    if (arg.startsWith("--")) {
-      const eqIdx = arg.indexOf("=");
-      const name = eqIdx === -1 ? arg.slice(2) : arg.slice(2, eqIdx);
-      const inlineValue = eqIdx === -1 ? void 0 : arg.slice(eqIdx + 1);
-      const kind = long[name];
-      if (kind === "boolean") {
-        if (inlineValue === "false") {
-          delete flags[name];
-        } else {
-          flags[name] = true;
-        }
-      } else if (kind === "string") {
-        if (inlineValue !== void 0) {
-          flags[name] = inlineValue;
-        } else {
-          const next = argv[i + 1];
-          if (next === void 0 || next.startsWith("-")) {
-            throw new UsageError(`expected value after --${name}`);
-          }
-          flags[name] = next;
-          i += 1;
-        }
-      } else {
-        if (inlineValue !== void 0) flags[name] = inlineValue;
-        else flags[name] = true;
-      }
-      continue;
-    }
-    if (arg.startsWith("-") && arg.length > 1) {
-      const shortName = arg.slice(1);
-      const longName = short[shortName];
-      if (!longName) {
-        throw new UsageError(`unknown short flag: ${arg}`);
-      }
-      const kind = long[longName];
-      if (kind === "string") {
-        const next = argv[i + 1];
-        if (next === void 0 || next.startsWith("-")) {
-          throw new UsageError(`expected value after ${arg}`);
-        }
-        flags[longName] = next;
-        i += 1;
-      } else {
-        flags[longName] = true;
-      }
-      continue;
-    }
-    positionals.push(arg);
-  }
-  return { positionals, flags };
-}
-function optionalString(parsed, name) {
-  const v = parsed.flags[name];
-  return typeof v === "string" ? v : void 0;
-}
-function bool(parsed, name) {
-  return parsed.flags[name] === true;
-}
-
 // plugins/cursor/scripts/lib/git.mts
 import { execFileSync } from "node:child_process";
 function runGit(cwd, args) {
@@ -280,6 +182,133 @@ function detectCloudRepository(cwd) {
   return branch ? { url, startingRef: branch } : { url };
 }
 
+// plugins/cursor/scripts/lib/state.mts
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+var STATE_ROOT_ENV = "CURSOR_PLUGIN_STATE_ROOT";
+var SLUG_HASH_LENGTH = 16;
+var SLUG_NAME_MAX = 32;
+var FILE_MODE = 384;
+var DIR_MODE = 448;
+function computeWorkspaceSlug(workspaceRoot) {
+  const canonical = path.resolve(workspaceRoot);
+  const hash = crypto.createHash("sha256").update(canonical).digest("hex").slice(0, SLUG_HASH_LENGTH);
+  const base = path.basename(canonical);
+  const sanitized = base.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "").slice(0, SLUG_NAME_MAX) || "workspace";
+  return `${sanitized}-${hash}`;
+}
+function resolveStateRoot(opts = {}) {
+  if (opts.root && opts.root.trim().length > 0) return path.resolve(opts.root);
+  const env = process.env[STATE_ROOT_ENV];
+  if (env && env.trim().length > 0) return path.resolve(env);
+  return path.join(os.homedir(), ".claude", "cursor-plugin");
+}
+function resolveStateDir(workspaceRoot, opts = {}) {
+  return path.join(resolveStateRoot(opts), computeWorkspaceSlug(workspaceRoot));
+}
+function ensureStateDir(stateDir) {
+  fs.mkdirSync(stateDir, { recursive: true, mode: DIR_MODE });
+  return stateDir;
+}
+function getStateIndexPath(stateDir) {
+  return path.join(stateDir, "state.json");
+}
+function assertSafeJobId(jobId) {
+  if (jobId.length === 0 || jobId.includes("/") || jobId.includes("\\") || jobId.includes("\0") || jobId === "." || jobId === "..") {
+    throw new Error(`invalid jobId: ${JSON.stringify(jobId)}`);
+  }
+}
+function getJobJsonPath(stateDir, jobId) {
+  assertSafeJobId(jobId);
+  return path.join(stateDir, `${jobId}.json`);
+}
+function getJobLogPath(stateDir, jobId) {
+  assertSafeJobId(jobId);
+  return path.join(stateDir, `${jobId}.log`);
+}
+function getSessionPath(stateDir) {
+  return path.join(stateDir, "session.json");
+}
+function writeJsonAtomic(filePath, data) {
+  ensureStateDir(path.dirname(filePath));
+  const tmp = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}
+`, { mode: FILE_MODE });
+  try {
+    fs.renameSync(tmp, filePath);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+function readJson(filePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(filePath, "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return void 0;
+    throw err;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return void 0;
+  }
+}
+function readStateIndex(stateDir) {
+  const data = readJson(getStateIndexPath(stateDir));
+  if (!data || !Array.isArray(data.jobs)) return { version: 1, jobs: [] };
+  return data;
+}
+function writeStateIndex(stateDir, index) {
+  writeJsonAtomic(getStateIndexPath(stateDir), index);
+}
+function readJob(stateDir, jobId) {
+  return readJson(getJobJsonPath(stateDir, jobId));
+}
+function writeJob(stateDir, record) {
+  writeJsonAtomic(getJobJsonPath(stateDir, record.id), record);
+}
+function appendJobLog(stateDir, jobId, text) {
+  ensureStateDir(stateDir);
+  fs.appendFileSync(getJobLogPath(stateDir, jobId), text, { mode: FILE_MODE });
+}
+function jobLogMtimeMs(stateDir, jobId) {
+  try {
+    return fs.statSync(getJobLogPath(stateDir, jobId)).mtimeMs;
+  } catch {
+    return void 0;
+  }
+}
+function readJobLog(stateDir, jobId) {
+  try {
+    return fs.readFileSync(getJobLogPath(stateDir, jobId), "utf8");
+  } catch (err) {
+    if (err.code === "ENOENT") return void 0;
+    throw err;
+  }
+}
+function tailJobLog(stateDir, jobId, lines) {
+  if (lines <= 0) return void 0;
+  const log = readJobLog(stateDir, jobId);
+  if (!log) return void 0;
+  const body = log.endsWith("\n") ? log.slice(0, -1) : log;
+  if (body.length === 0) return void 0;
+  const split = body.split("\n");
+  return (split.length <= lines ? split : split.slice(-lines)).join("\n");
+}
+function readSession(stateDir) {
+  return readJson(getSessionPath(stateDir));
+}
+function writeSession(stateDir, session) {
+  writeJsonAtomic(getSessionPath(stateDir), session);
+}
+function clearSession(stateDir) {
+  fs.rmSync(getSessionPath(stateDir), { force: true });
+}
+
 // plugins/cursor/scripts/lib/cursor-agent.mts
 import {
   Agent,
@@ -389,10 +418,10 @@ async function withRetry(fn, options = {}) {
 }
 
 // plugins/cursor/scripts/lib/user-config.mts
-import path from "node:path";
+import path2 from "node:path";
 var USER_CONFIG_ENV_MODEL = "CURSOR_MODEL";
 function getUserConfigPath(opts = {}) {
-  return path.join(resolveStateRoot(opts), "config.json");
+  return path2.join(resolveStateRoot(opts), "config.json");
 }
 function readUserConfig(opts = {}) {
   const data = readJson(getUserConfigPath(opts));
@@ -673,21 +702,8 @@ function ingestEvent(event, textParts, toolCalls) {
   }
 }
 
-// plugins/cursor/scripts/lib/prompts.mts
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-var PROMPTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "prompts");
-function loadPromptTemplate(name) {
-  const promptPath = join(PROMPTS_DIR, `${name}.md`);
-  return readFileSync(promptPath, "utf8");
-}
-function interpolateTemplate(template, variables) {
-  return template.replace(
-    /\{\{([A-Z_]+)\}\}/g,
-    (_, key) => Object.hasOwn(variables, key) ? variables[key] ?? "" : ""
-  );
-}
+// plugins/cursor/scripts/lib/job-control.mts
+import crypto2 from "node:crypto";
 
 // plugins/cursor/scripts/lib/redact.mts
 var PLACEHOLDER = "[REDACTED]";
@@ -713,208 +729,17 @@ function redactError(error) {
   return redactApiKey(String(error));
 }
 
-// plugins/cursor/scripts/lib/render.mts
-function compactText(text) {
-  return text.replace(/\s+/g, " ").trim();
-}
-var TOOL_SUMMARY_KEYS = {
-  read: [["path", "filePath", "target_file", "absolutePath"], ["offset"], ["limit"]],
-  glob: [
-    ["pattern", "glob", "glob_pattern"],
-    ["path", "cwd", "target_directory"]
-  ],
-  grep: [["pattern", "query"], ["path"], ["glob"], ["type"]],
-  search: [["pattern", "query"], ["path"], ["glob"], ["type"]],
-  shell: [
-    ["command", "cmd"],
-    ["cwd", "working_directory"]
-  ],
-  terminal: [
-    ["command", "cmd"],
-    ["cwd", "working_directory"]
-  ],
-  command: [
-    ["command", "cmd"],
-    ["cwd", "working_directory"]
-  ],
-  edit: [["path", "target_file", "file"], ["instruction"]],
-  write: [["path", "target_file", "file"], ["instruction"]],
-  patch: [["path", "target_file", "file"], ["instruction"]]
-};
-var TOOL_SUMMARY_FALLBACK = [
-  ["path", "file", "target_file"],
-  ["pattern", "query", "command"]
-];
-function getToolSummaryKeys(toolName) {
-  const lower = toolName.toLowerCase();
-  for (const [needle, keys] of Object.entries(TOOL_SUMMARY_KEYS)) {
-    if (lower.includes(needle)) return keys;
-  }
-  return TOOL_SUMMARY_FALLBACK;
-}
-function shortenValue(value, maxLength = 80) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3)}...`;
-}
-function formatArgValue(value) {
-  if (typeof value === "string") return shortenValue(value.replace(/\s+/g, " ").trim());
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) {
-    const items = value.slice(0, 3).map(formatArgValue).filter(Boolean);
-    return items.length > 0 ? `[${items.join(",")}]` : void 0;
-  }
-  return void 0;
-}
-function summarizeToolArgs(toolName, args) {
-  if (!args || typeof args !== "object") return void 0;
-  const record = args;
-  const groups = getToolSummaryKeys(toolName);
-  const parts = [];
-  for (const keys of groups) {
-    for (const key of keys) {
-      const value = record[key];
-      const formatted = formatArgValue(value);
-      if (formatted) {
-        parts.push(`${key}=${formatted}`);
-        break;
-      }
-    }
-  }
-  return parts.length > 0 ? parts.join(" ") : void 0;
-}
-function renderStreamEvent(event, options = {}) {
-  switch (event.type) {
-    case "assistant_text":
-      return { stdout: event.text };
-    case "thinking": {
-      if (options.quietThinking) return {};
-      const t = compactText(event.text);
-      return t ? { stderr: `[thinking] ${t}
-` } : {};
-    }
-    case "tool": {
-      const summary = summarizeToolArgs(event.name, event.args);
-      const tail = summary ? ` ${summary}` : "";
-      return { stderr: `[tool] ${event.status} ${event.name}${tail}
-` };
-    }
-    case "status": {
-      if (options.quietStatus && event.status === "finished") return {};
-      const msg = event.message ? ` ${compactText(event.message)}` : "";
-      return { stderr: `[status] ${event.status}${msg}
-` };
-    }
-    case "task": {
-      const head = [event.status, event.text].filter((s) => Boolean(s));
-      if (head.length === 0) return {};
-      return { stderr: `[task] ${compactText(head.join(" "))}
-` };
-    }
-    case "system":
-      return {};
-  }
-}
-var TABLE_HEADERS = ["id", "type", "status", "age", "summary"];
-function rowsFromJobs(jobs, now) {
-  return jobs.map((job) => {
-    const created = Date.parse(job.createdAt);
-    const ageMs = Number.isFinite(created) ? now - created : 0;
-    return {
-      id: job.id,
-      type: job.type,
-      status: job.status,
-      age: formatAge(ageMs),
-      summary: job.summary ? compactText(job.summary).slice(0, 60) : ""
-    };
-  });
-}
-function formatAge(ms) {
-  if (!Number.isFinite(ms) || ms < 0) return "?";
-  const sec = Math.floor(ms / 1e3);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  return `${Math.floor(hr / 24)}d`;
-}
-function ageFromIso(iso, now = Date.now()) {
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? formatAge(now - t) : "?";
-}
-function renderJobTable(jobs, now = Date.now()) {
-  if (jobs.length === 0) return "(no jobs)\n";
-  const rows = rowsFromJobs(jobs, now);
-  const widths = {
-    id: "id".length,
-    type: "type".length,
-    status: "status".length,
-    age: "age".length,
-    summary: "summary".length
-  };
-  for (const r of rows) {
-    for (const key of TABLE_HEADERS) {
-      widths[key] = Math.max(widths[key], r[key].length);
-    }
-  }
-  const header = TABLE_HEADERS.map((k) => k.toUpperCase().padEnd(widths[k])).join("  ");
-  const separator = TABLE_HEADERS.map((k) => "-".repeat(widths[k])).join("  ");
-  const body = rows.map((r) => TABLE_HEADERS.map((k) => r[k].padEnd(widths[k])).join("  ")).join("\n");
-  return `${header}
-${separator}
-${body}
-`;
-}
-var SEVERITY_ORDER = {
-  critical: 0,
-  high: 1,
-  medium: 2,
-  low: 3
-};
-function renderReviewResult(review) {
-  const lines = [];
-  lines.push(`verdict: ${review.verdict}`);
-  if (review.summary) lines.push("", review.summary);
-  const findings = [...review.findings].sort((a, b) => {
-    const sev = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
-    if (sev !== 0) return sev;
-    return a.file.localeCompare(b.file);
-  });
-  if (findings.length === 0) {
-    lines.push("", "findings: (none)");
-  } else {
-    lines.push("", `findings: ${findings.length}`);
-    for (const f of findings) {
-      const loc = f.line_start === f.line_end ? `${f.file}:${f.line_start}` : `${f.file}:${f.line_start}-${f.line_end}`;
-      const conf = Number.isFinite(f.confidence) ? `(confidence ${f.confidence.toFixed(2)})` : "";
-      lines.push("", `[${f.severity.toUpperCase()}] ${f.title} \u2014 ${loc} ${conf}`.trim(), f.body);
-      if (f.recommendation) {
-        lines.push(`  \u2192 ${f.recommendation}`);
-      }
-    }
-  }
-  if (review.next_steps.length > 0) {
-    lines.push("", "next steps:");
-    for (const step of review.next_steps) {
-      lines.push(`  - ${step}`);
-    }
-  }
-  return `${lines.join("\n")}
-`;
-}
-function renderError(error) {
-  return `error: ${redactError(error)}
-`;
-}
-
 // plugins/cursor/scripts/lib/job-control.mts
-import crypto from "node:crypto";
-var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
+var TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+  "completed",
+  "failed",
+  "cancelled"
+]);
 var STALE_JOB_TTL_MS = 30 * 60 * 1e3;
 var JOB_ID_BYTES = 6;
 function newJobId(type) {
   const prefix = type === "adversarial-review" ? "adv" : type;
-  return `${prefix}-${crypto.randomBytes(JOB_ID_BYTES).toString("hex")}`;
+  return `${prefix}-${crypto2.randomBytes(JOB_ID_BYTES).toString("hex")}`;
 }
 function nowIso() {
   return (/* @__PURE__ */ new Date()).toISOString();
@@ -931,8 +756,11 @@ function indexEntry(record) {
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
+  if (record.startedAt) entry.startedAt = record.startedAt;
+  if (record.finishedAt) entry.finishedAt = record.finishedAt;
   const summary = record.metadata && typeof record.metadata.summary === "string" ? record.metadata.summary : summarize(record.prompt);
   if (summary) entry.summary = summary;
+  if (record.phase) entry.phase = record.phase;
   return entry;
 }
 function upsertIndex(stateDir, record) {
@@ -1057,6 +885,21 @@ function markFailed(stateDir, jobId, error) {
     error: redactApiKey(error)
   });
 }
+var PHASE_MAX_LENGTH = 80;
+function normalizePhase(raw) {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (compact.length <= PHASE_MAX_LENGTH) return compact;
+  return `${compact.slice(0, PHASE_MAX_LENGTH - 3)}...`;
+}
+function markPhase(stateDir, jobId, phase) {
+  const normalized = normalizePhase(phase);
+  if (!normalized) return void 0;
+  const existing = readJob(stateDir, jobId);
+  if (!existing) return void 0;
+  if (TERMINAL_STATUSES.has(existing.status)) return existing;
+  if (existing.phase === normalized) return existing;
+  return update(stateDir, jobId, { phase: normalized });
+}
 function markCancelled(stateDir, jobId, reason) {
   const updates = {
     status: "cancelled",
@@ -1118,247 +961,25 @@ function reconcileStaleJobs(stateDir, ttlMs = STALE_JOB_TTL_MS) {
   return reconciled;
 }
 
-// plugins/cursor/scripts/commands/review.mts
-var HELP = `cursor-companion review [flags]
-cursor-companion adversarial-review [flags] [focus text...]
-
-Review a git diff. Returns a structured ReviewOutput JSON: verdict, summary,
-findings[], next_steps[]. Adversarial-review additionally accepts free-form
-focus text as positional arguments \u2014 those are passed to the reviewer as the
-priority axis.
-
-flags:
-  --staged             Review staged changes only (git diff --cached)
-  --scope <auto|working-tree|branch>
-                       Review scope. 'auto' (default) picks working-tree when
-                       the tree is dirty, otherwise branch-vs-default-branch.
-                       Mutually exclusive with --staged.
-  --base <ref>         Diff against this ref. Implies branch scope.
-  --model <id>         Override the default model
-  --timeout <ms>       Cancel the review if it exceeds this duration
-  --json               Print the raw structured review JSON
-  --help, -h
-`;
-var VALID_SCOPES = /* @__PURE__ */ new Set(["auto", "working-tree", "branch"]);
-var SCHEMA = `{
-  "verdict": "approve" | "needs-attention",
-  "summary": string,
-  "findings": [{
-    "severity": "critical" | "high" | "medium" | "low",
-    "title": string,
-    "body": string,
-    "file": string,
-    "line_start": number,
-    "line_end": number,
-    "confidence": number,
-    "recommendation": string
-  }],
-  "next_steps": string[]
-}`;
-var HelpRequested = class extends Error {
-};
-function parseFlags(args) {
-  const parsed = parseArgs(args, {
-    long: {
-      staged: "boolean",
-      scope: "string",
-      base: "string",
-      model: "string",
-      timeout: "string",
-      json: "boolean",
-      help: "boolean"
-    },
-    short: { h: "help", m: "model" }
-  });
-  if (bool(parsed, "help")) throw new HelpRequested();
-  const staged = bool(parsed, "staged");
-  const scopeRaw = optionalString(parsed, "scope");
-  if (scopeRaw && !VALID_SCOPES.has(scopeRaw)) {
-    throw new UsageError(
-      `invalid --scope: ${scopeRaw} (expected one of ${[...VALID_SCOPES].join(", ")})`
-    );
-  }
-  if (staged && scopeRaw && scopeRaw !== "working-tree") {
-    throw new UsageError("--staged is only compatible with --scope working-tree");
-  }
-  const flags = {
-    staged,
-    scope: scopeRaw ?? "auto",
-    json: bool(parsed, "json"),
-    focus: parsed.positionals.join(" ").trim()
-  };
-  const base = optionalString(parsed, "base");
-  if (base) flags.baseRef = base;
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
-  const timeout = optionalString(parsed, "timeout");
-  if (timeout) {
-    const ms = Number(timeout);
-    if (!Number.isFinite(ms) || ms <= 0) throw new UsageError(`invalid --timeout: ${timeout}`);
-    flags.timeoutMs = ms;
-  }
-  return flags;
-}
-function buildReviewPrompt(opts) {
-  const templateName = opts.adversarial ? "adversarial-review" : "review";
-  const focusSection = opts.focus ? `Reviewer focus (priority axis): ${opts.focus}` : "";
-  return interpolateTemplate(loadPromptTemplate(templateName), {
-    TARGET_LABEL: opts.targetLabel,
-    FOCUS_SECTION: focusSection,
-    SCHEMA,
-    STATUS: opts.status || "(clean)",
-    DIFF: opts.diff
-  });
-}
-function extractJson(raw) {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  if (fenced) return fenced[1] ?? trimmed;
-  return trimmed;
-}
-function parseReview(raw) {
-  const text = extractJson(raw);
-  let parsed;
+// plugins/cursor/scripts/lib/workspace.mts
+import { execFileSync as execFileSync2 } from "node:child_process";
+import path3 from "node:path";
+function resolveWorkspaceRoot(cwd) {
   try {
-    parsed = JSON.parse(text);
-  } catch (err) {
-    throw new Error(
-      `review output was not valid JSON: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-  if (!parsed || typeof parsed !== "object") throw new Error("review output is not an object");
-  const obj = parsed;
-  if (obj.verdict !== "approve" && obj.verdict !== "needs-attention") {
-    throw new Error(`review verdict is invalid: ${JSON.stringify(obj.verdict)}`);
-  }
-  if (typeof obj.summary !== "string") throw new Error("review summary missing");
-  if (!Array.isArray(obj.findings)) throw new Error("review findings must be an array");
-  if (!Array.isArray(obj.next_steps)) throw new Error("review next_steps must be an array");
-  return parsed;
-}
-async function runReview(args, io, options) {
-  let flags;
-  try {
-    flags = parseFlags(args);
-  } catch (err) {
-    if (err instanceof HelpRequested) {
-      io.stdout.write(HELP);
-      return 0;
-    }
-    throw err;
-  }
-  if (flags.focus && !options.adversarial) {
-    throw new UsageError(
-      "free-form focus text is only accepted for adversarial-review (got positional args)"
-    );
-  }
-  const cwd = io.cwd();
-  const workspaceRoot = resolveWorkspaceRoot(cwd);
-  const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
-  const diffOpts = {};
-  let targetLabel;
-  if (flags.staged) {
-    diffOpts.staged = true;
-    targetLabel = "staged diff";
-  } else {
-    const target = resolveReviewTarget(workspaceRoot, {
-      scope: flags.scope,
-      ...flags.baseRef ? { baseRef: flags.baseRef } : {}
+    const out = execFileSync2("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
     });
-    if (target.baseRef) diffOpts.baseRef = target.baseRef;
-    targetLabel = target.label;
-  }
-  const diff = getDiff(workspaceRoot, diffOpts);
-  if (!diff) {
-    io.stderr.write("nothing to review (empty diff)\n");
-    return 0;
-  }
-  const prompt = buildReviewPrompt({
-    diff,
-    status: getStatus(workspaceRoot),
-    targetLabel,
-    focus: flags.focus,
-    adversarial: Boolean(options.adversarial)
-  });
-  const job = createJob(stateDir, {
-    type: options.adversarial ? "adversarial-review" : "review",
-    prompt: `${options.adversarial ? "adversarial-" : ""}review (${targetLabel})`
-  });
-  const oneShotOpts = {
-    cwd: workspaceRoot,
-    onRunStart: (run) => {
-      markRunning(stateDir, job.id, { agentId: run.agentId, runId: run.id });
+    const root = out.trim();
+    if (root.length > 0) {
+      return path3.resolve(root);
     }
-  };
-  if (flags.model) oneShotOpts.model = flags.model;
-  if (flags.timeoutMs) oneShotOpts.timeoutMs = flags.timeoutMs;
-  let result;
-  try {
-    result = await oneShot(prompt, oneShotOpts);
-  } catch (err) {
-    markFailed(stateDir, job.id, err instanceof Error ? err.message : String(err));
-    throw err;
+  } catch {
   }
-  markFinished(stateDir, job.id, result);
-  if (result.status !== "finished") {
-    io.stderr.write(`review run did not finish: ${result.status}
-`);
-    return 1;
-  }
-  let review;
-  try {
-    review = parseReview(result.output);
-  } catch (err) {
-    io.stderr.write(
-      `failed to parse review output: ${err instanceof Error ? err.message : String(err)}
-`
-    );
-    io.stderr.write("raw output:\n");
-    io.stderr.write(result.output);
-    if (!result.output.endsWith("\n")) io.stderr.write("\n");
-    return 1;
-  }
-  if (flags.json) {
-    io.stdout.write(`${JSON.stringify(review, null, 2)}
-`);
-  } else {
-    io.stdout.write(renderReviewResult(review));
-  }
-  return review.verdict === "approve" ? 0 : 1;
-}
-
-// plugins/cursor/scripts/lib/gate.mts
-import path2 from "node:path";
-var DEFAULT_GATE_CONFIG = { version: 1, enabled: false };
-var DEFAULT_GATE_TIMEOUT_MS = 6e5;
-function getGatePath(stateDir) {
-  return path2.join(stateDir, "gate.json");
-}
-function readGateConfig(stateDir) {
-  const cfg = readJson(getGatePath(stateDir));
-  if (!cfg || typeof cfg !== "object") return { ...DEFAULT_GATE_CONFIG };
-  return {
-    version: 1,
-    enabled: cfg.enabled === true,
-    ...cfg.model ? { model: cfg.model } : {},
-    ...typeof cfg.timeoutMs === "number" && cfg.timeoutMs > 0 ? { timeoutMs: cfg.timeoutMs } : {}
-  };
-}
-function writeGateConfig(stateDir, config) {
-  writeJsonAtomic(getGatePath(stateDir), { ...config, version: 1 });
-}
-function setGateEnabled(stateDir, enabled) {
-  const current = readGateConfig(stateDir);
-  const next = { ...current, version: 1, enabled };
-  writeGateConfig(stateDir, next);
-  return next;
+  return path3.resolve(cwd);
 }
 
 export {
-  UsageError,
-  parseArgs,
-  optionalString,
-  bool,
   detectBackend,
   storeApiKey,
   deleteApiKey,
@@ -1366,7 +987,17 @@ export {
   getStatus,
   getRecentCommits,
   getBranch,
+  resolveReviewTarget,
   getSourceTree,
+  resolveStateDir,
+  ensureStateDir,
+  writeJsonAtomic,
+  readJson,
+  readJobLog,
+  tailJobLog,
+  readSession,
+  writeSession,
+  clearSession,
   setDefaultModel,
   clearDefaultModel,
   resolveDefaultModel,
@@ -1383,6 +1014,8 @@ export {
   listModels,
   validateModel,
   toAgentEvents,
+  redactError,
+  TERMINAL_STATUSES,
   createJob,
   getJob,
   listJobs,
@@ -1390,22 +1023,12 @@ export {
   markRunning,
   markFinished,
   markFailed,
+  markPhase,
+  markCancelled,
   registerActiveRun,
   unregisterActiveRun,
   cancelJob,
   logJobLine,
   reconcileStaleJobs,
-  loadPromptTemplate,
-  interpolateTemplate,
-  compactText,
-  renderStreamEvent,
-  ageFromIso,
-  renderJobTable,
-  renderReviewResult,
-  renderError,
-  parseReview,
-  runReview,
-  DEFAULT_GATE_TIMEOUT_MS,
-  readGateConfig,
-  setGateEnabled
+  resolveWorkspaceRoot
 };

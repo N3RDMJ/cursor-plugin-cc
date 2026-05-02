@@ -11,6 +11,7 @@ import {
   whoami,
 } from "../lib/cursor-agent.mjs";
 import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
+import { escapeMarkdownCell } from "../lib/render.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
 import {
   clearDefaultModel,
@@ -166,32 +167,40 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
 function renderReport(report: SetupReport): string {
   const lines: string[] = [];
   const yes = (ok: boolean): string => (ok ? "ok" : "fail");
-  lines.push(`Node.js     ${yes(report.node.ok)}  (${report.node.version})`);
+  lines.push("# Cursor Setup");
+  lines.push("");
+  lines.push("| Check | Result | Detail |");
+  lines.push("| --- | --- | --- |");
+  const row = (label: string, result: string, detail: string): void => {
+    lines.push(
+      `| ${escapeMarkdownCell(label)} | ${escapeMarkdownCell(result)} | ${escapeMarkdownCell(detail)} |`,
+    );
+  };
+  row("Node.js", yes(report.node.ok), report.node.version);
   const keyDetail = report.apiKey.ok
-    ? `  (source: ${report.apiKey.source})`
-    : report.apiKey.error
-      ? `  ${report.apiKey.error}`
-      : "";
-  lines.push(`API key     ${yes(report.apiKey.ok)}${keyDetail}`);
+    ? `source: ${report.apiKey.source}`
+    : (report.apiKey.error ?? "");
+  row("API key", yes(report.apiKey.ok), keyDetail);
   if (report.account.ok) {
-    lines.push(`Account     ok    (key: ${report.account.apiKeyName ?? "?"})`);
+    row("Account", "ok", `key: ${report.account.apiKeyName ?? "?"}`);
   } else if (report.account.error) {
-    lines.push(`Account     fail  ${report.account.error}`);
+    row("Account", "fail", report.account.error);
   }
   if (report.models.ok) {
-    lines.push(`Models      ok    (${report.models.choices.length} available)`);
-    for (const choice of report.models.choices) {
-      lines.push(`  - ${choice.label}  [${choice.selection.id}]`);
-    }
+    row("Models", "ok", `${report.models.choices.length} available`);
   } else if (report.models.error) {
-    lines.push(`Models      fail  ${report.models.error}`);
+    row("Models", "fail", report.models.error);
   }
-  lines.push(
-    `Default     ${report.defaultModel.id}  (${describeSource(report.defaultModel.source)})`,
-  );
-  lines.push(
-    `Stop gate   ${report.gate.enabled ? "on" : "off"}   (workspace: ${report.gate.workspaceRoot})`,
-  );
+  row("Default", report.defaultModel.id, describeSource(report.defaultModel.source));
+  row("Stop gate", report.gate.enabled ? "on" : "off", `workspace: ${report.gate.workspaceRoot}`);
+
+  if (report.models.ok && report.models.choices.length > 0) {
+    lines.push("");
+    lines.push("**Available models:**");
+    for (const choice of report.models.choices) {
+      lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
+    }
+  }
   return `${lines.join("\n")}\n`;
 }
 

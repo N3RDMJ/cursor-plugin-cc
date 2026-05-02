@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { parseHookPayload, readHookStdinSync } from "./lib/hook-payload.mjs";
+import { listJobs, markCancelled } from "./lib/job-control.mjs";
 import {
   clearSession,
   ensureStateDir,
@@ -9,6 +10,8 @@ import {
   writeSession,
 } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
+
+const SESSION_END_KEEP_ENV = "CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS";
 
 const EVENTS = ["SessionStart", "SessionEnd"] as const;
 type LifecycleEvent = (typeof EVENTS)[number];
@@ -45,10 +48,25 @@ function handleSessionEnd(): number {
   const stateDir = resolveStateDir(workspaceRoot);
   const session = readSession(stateDir);
   if (!session) return 0;
-  // Best-effort: clear the session marker. We don't dispose agents here —
-  // background tasks may still be running, and the SDK manages durable agent
-  // lifecycle on its own. A future enhancement could iterate `agentIds` and
-  // dispose any that are still attached.
+
+  // Mark every still-active job for this workspace as cancelled. The owning
+  // CLI process started in --background mode is gone, so the in-memory Run
+  // can't be reached for a clean cancel — we record the intent and let the
+  // SDK time out the underlying agent. Set CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS=1
+  // to opt out and keep them running until the 30-min stale-job reconciler
+  // catches them.
+  const keep = process.env[SESSION_END_KEEP_ENV];
+  if (!keep || keep === "0" || keep === "false") {
+    for (const entry of listJobs(stateDir)) {
+      if (entry.status === "pending" || entry.status === "running") {
+        try {
+          markCancelled(stateDir, entry.id, "session-ended");
+        } catch {
+          // Best-effort: continue even if a single job's persistence fails.
+        }
+      }
+    }
+  }
   clearSession(stateDir);
   return 0;
 }

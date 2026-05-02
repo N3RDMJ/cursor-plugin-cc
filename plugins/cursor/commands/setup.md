@@ -2,6 +2,7 @@
 description: Validate the cursor-plugin-cc runtime — Node, API key, account, models. Manage credentials and the Stop review gate.
 argument-hint: '[--login|--logout] [--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
 allowed-tools: Bash(node:*), Bash(printf:*), Bash(rm:*)
+disable-model-invocation: true
 ---
 
 # /cursor:setup

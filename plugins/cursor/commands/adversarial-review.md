@@ -2,6 +2,7 @@
 description: Run a Cursor review that challenges the implementation approach and design choices
 argument-hint: '[--wait|--background] [--base <ref>] [--staged] [--scope auto|working-tree|branch] [focus ...]'
 allowed-tools: Read, Glob, Grep, Bash(node:*), Bash(git:*), AskUserQuestion
+disable-model-invocation: true
 ---
 
 Run an adversarial Cursor review through the shared plugin runtime.

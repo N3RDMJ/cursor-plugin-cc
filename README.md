@@ -210,13 +210,16 @@ Supports `--type`, `--status`, and `--limit` filters. Use `--wait` with `--timeo
 
 ### `/cursor:result`
 
-Shows the final stored output for a finished job.
+Shows the final stored output for a finished job. With no argument, defaults to
+the most recent terminal job for the workspace — convenient when chaining the
+typical `/cursor:task --background` → `/cursor:status` → `/cursor:result` flow.
 
 Examples:
 
 ```bash
-/cursor:result
-/cursor:result task-abc123
+/cursor:result                # most recent terminal job in this workspace
+/cursor:result task-abc123    # specific job
+/cursor:result --log          # streaming event log instead of the result text
 ```
 
 ### `/cursor:cancel`
@@ -305,7 +308,21 @@ Override the root with `CURSOR_PLUGIN_STATE_ROOT` (useful for tests and developm
 
 ### Moving the Work Over to Cursor
 
-Delegated tasks can be resumed directly in Cursor by using the agent ID from `/cursor:status` or `/cursor:result`. Use `/cursor:resume <agent-id>` to continue from Claude Code, or open the agent in Cursor's own UI.
+Delegated tasks can be resumed from either CLI:
+
+- `/cursor:resume <agent-id>` — continue from Claude Code
+- `cursor-agent resume <agent-id>` — continue from the standalone Cursor CLI
+
+`/cursor:status <job-id>` and `/cursor:result <job-id>` print these handoff
+hints inline so you can copy-paste straight into the surface you want.
+
+### Cleanup on session end
+
+When Claude Code's `SessionEnd` hook fires, the plugin marks any still-active
+jobs for this workspace as cancelled — keeps a closed Claude Code window from
+leaving orphan agents burning Cursor usage. Set
+`CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS=1` to opt out and let the 30-minute
+stale-job reconciler handle them instead.
 
 ## FAQ
 

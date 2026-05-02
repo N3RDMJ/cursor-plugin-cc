@@ -5,13 +5,16 @@ import {
 import {
   clearSession,
   ensureStateDir,
+  listJobs,
+  markCancelled,
   readSession,
   resolveStateDir,
   resolveWorkspaceRoot,
   writeSession
-} from "./chunk-PI7XIE4N.mjs";
+} from "./chunk-B3GESHAJ.mjs";
 
 // plugins/cursor/scripts/session-lifecycle-hook.mts
+var SESSION_END_KEEP_ENV = "CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS";
 var EVENTS = ["SessionStart", "SessionEnd"];
 function handleSessionStart() {
   const payload = parseHookPayload(readHookStdinSync());
@@ -36,6 +39,17 @@ function handleSessionEnd() {
   const stateDir = resolveStateDir(workspaceRoot);
   const session = readSession(stateDir);
   if (!session) return 0;
+  const keep = process.env[SESSION_END_KEEP_ENV];
+  if (!keep || keep === "0" || keep === "false") {
+    for (const entry of listJobs(stateDir)) {
+      if (entry.status === "pending" || entry.status === "running") {
+        try {
+          markCancelled(stateDir, entry.id, "session-ended");
+        } catch {
+        }
+      }
+    }
+  }
   clearSession(stateDir);
   return 0;
 }
