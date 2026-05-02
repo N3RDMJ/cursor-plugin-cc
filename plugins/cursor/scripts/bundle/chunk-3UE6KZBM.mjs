@@ -249,7 +249,7 @@ function appendDirSummary(lines, files) {
     dirs.set(dir, (dirs.get(dir) ?? 0) + 1);
   }
   for (const [dir, count] of [...dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    lines.push(`  ${dir}/ (${count} files)`);
+    lines.push(`  ${dir}/ (${count} ${count === 1 ? "file" : "files"})`);
   }
 }
 function getRemoteUrl(cwd) {
