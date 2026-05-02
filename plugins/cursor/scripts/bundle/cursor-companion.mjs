@@ -16,6 +16,7 @@ import {
   getBranch,
   getJob,
   getRecentCommits,
+  getSourceTree,
   interpolateTemplate,
   listJobs,
   listModels,
@@ -45,7 +46,7 @@ import {
   unregisterActiveRun,
   validateModel,
   whoami
-} from "./chunk-OUYHEEC5.mjs";
+} from "./chunk-I3PG3UMP.mjs";
 import {
   ensureStateDir,
   readJobLog,
@@ -1003,12 +1004,17 @@ function buildContextHeader(workspaceRoot) {
   const lines = [];
   const branch = getBranch(workspaceRoot);
   if (branch) lines.push(`Current branch: ${branch}`);
-  const commits = getRecentCommits(workspaceRoot, 5);
+  const commits = getRecentCommits(workspaceRoot, 3);
   if (commits.length > 0) {
     lines.push("Recent commits:");
     for (const c of commits) {
       lines.push(`  ${c.hash.slice(0, 8)} ${c.subject}`);
     }
+  }
+  const sourceTree = getSourceTree(workspaceRoot);
+  if (sourceTree) {
+    lines.push("");
+    lines.push(sourceTree);
   }
   return lines.join("\n");
 }

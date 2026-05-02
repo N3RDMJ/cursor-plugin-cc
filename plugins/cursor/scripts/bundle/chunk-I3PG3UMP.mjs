@@ -195,6 +195,63 @@ function resolveReviewTarget(cwd, options = {}) {
     explicit: false
   };
 }
+var SOURCE_EXTS = /\.(mts|ts|tsx)$/;
+var DECLARATION_EXTS = /\.d\.(mts|ts)$/;
+var TEST_PATTERN = /\.test\.(mts|ts|tsx)$/;
+var COMPILED_DIRS = /(?:^|\/)(?:bundle|dist|build|compiled|output)\//;
+var COMPILED_EXTS = /\.(mjs|js|cjs)$/;
+var MAX_LISTED_FILES = 50;
+function getSourceTree(cwd) {
+  const out = runGit(cwd, ["ls-files"]);
+  if (!out) return "";
+  const files = out.split("\n").filter((f) => f.length > 0);
+  const source = [];
+  const tests = [];
+  const compiled = [];
+  for (const f of files) {
+    if (SOURCE_EXTS.test(f) && !DECLARATION_EXTS.test(f)) {
+      if (TEST_PATTERN.test(f)) {
+        tests.push(f);
+      } else {
+        source.push(f);
+      }
+    } else if (COMPILED_EXTS.test(f) && COMPILED_DIRS.test(f)) {
+      compiled.push(f);
+    }
+  }
+  if (source.length === 0 && compiled.length === 0) return "";
+  const lines = [];
+  if (source.length > 0) {
+    lines.push("Source files (read these):");
+    appendFiles(lines, source);
+  }
+  if (tests.length > 0) {
+    lines.push("Tests:");
+    appendFiles(lines, tests);
+  }
+  if (compiled.length > 0) {
+    lines.push("Compiled output (do not read \u2014 use the source files above):");
+    appendDirSummary(lines, compiled);
+  }
+  return lines.join("\n");
+}
+function appendFiles(lines, files) {
+  if (files.length <= MAX_LISTED_FILES) {
+    for (const f of files) lines.push(`  ${f}`);
+    return;
+  }
+  appendDirSummary(lines, files);
+}
+function appendDirSummary(lines, files) {
+  const dirs = /* @__PURE__ */ new Map();
+  for (const f of files) {
+    const dir = f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : ".";
+    dirs.set(dir, (dirs.get(dir) ?? 0) + 1);
+  }
+  for (const [dir, count] of [...dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    lines.push(`  ${dir}/ (${count} files)`);
+  }
+}
 function getRemoteUrl(cwd) {
   return runGit(cwd, ["config", "--get", "remote.origin.url"]) || void 0;
 }
@@ -1309,6 +1366,7 @@ export {
   getStatus,
   getRecentCommits,
   getBranch,
+  getSourceTree,
   setDefaultModel,
   clearDefaultModel,
   resolveDefaultModel,

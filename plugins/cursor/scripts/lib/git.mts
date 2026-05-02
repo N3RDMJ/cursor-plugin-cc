@@ -225,8 +225,11 @@ export function getSourceTree(cwd: string): string {
     appendFiles(lines, tests);
   }
   if (compiled.length > 0) {
+    // Per-file listing of compiled artifacts is pure noise: the prompt
+    // already says ignore .mjs/.js and full paths just bait the agent's
+    // curiosity. Surface the directories only.
     lines.push("Compiled output (do not read — use the source files above):");
-    appendFiles(lines, compiled);
+    appendDirSummary(lines, compiled);
   }
 
   return lines.join("\n");
@@ -237,6 +240,10 @@ function appendFiles(lines: string[], files: string[]): void {
     for (const f of files) lines.push(`  ${f}`);
     return;
   }
+  appendDirSummary(lines, files);
+}
+
+function appendDirSummary(lines: string[], files: string[]): void {
   const dirs = new Map<string, number>();
   for (const f of files) {
     const dir = f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : ".";

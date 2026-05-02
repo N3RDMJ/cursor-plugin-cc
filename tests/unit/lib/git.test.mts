@@ -251,7 +251,8 @@ describe("getSourceTree", () => {
     expect(tree).toContain("Tests:");
     expect(tree).toContain("tests/main.test.mts");
     expect(tree).toContain("Compiled output (do not read");
-    expect(tree).toContain("src/bundle/main.mjs");
+    expect(tree).toContain("src/bundle/ (1 files)");
+    expect(tree).not.toContain("src/bundle/main.mjs");
   });
 
   it("returns empty string for repos with no source or bundle files", () => {

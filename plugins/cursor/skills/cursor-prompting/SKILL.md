@@ -1,50 +1,78 @@
 ---
 name: cursor-prompting
-description: How to compose effective prompts for the Cursor agent (task structure, context inclusion, structured-output contracts).
+description: How to compose effective prompts for Cursor (composer-2). Block-based recipes for tasks, reviews, diagnosis, and research, plus anti-patterns to avoid.
 ---
 
-# Task structure
+# Cursor Prompting
 
-A good `cursor-companion.mjs task` prompt has three parts:
+Use this skill when `cursor-rescue` (or any custom call to
+`cursor-companion task`) needs to ask Cursor for help.
 
-1. **Goal**: one sentence stating what success looks like ("the auth tests
-   pass", "the function is renamed throughout the codebase").
-2. **Constraints**: anything Cursor needs to preserve. Files to leave alone,
-   APIs that other code depends on, performance budgets, no-deps rules.
-3. **Acceptance signal**: how you (or the user) will know it worked. A
-   command to run, a test that should pass, a property that should hold.
+Prompt Cursor like an operator, not a collaborator. Keep prompts compact
+and block-structured with XML tags. State the task, the output contract,
+the follow-through default, and the small set of extra constraints that
+matter for this run.
 
-The task subcommand prepends a short system instruction and (when in a git
-repo) the current branch + last 5 commits, so you don't need to restate
-"you are a coding agent" or paste git context.
+## Core rules
 
-# When to use `--write` vs read-only
+- One clear task per run. Split unrelated asks into separate runs.
+- Tell Cursor what done looks like. Don't assume it will infer the end state.
+- Add explicit grounding for any task where unsupported guesses would hurt.
+- Prefer better prompt contracts over raising reasoning or pasting more text.
+- Use stable XML tag names so the prompt has reliable internal structure.
 
-Default is **read-only**: Cursor reads, analyzes, and proposes changes in
-its response. Use this when you want to preview the work or get a design
-opinion.
+## Default prompt recipe
 
-`--write` lets Cursor modify files. Use this when:
-- The change is mechanical (rename, codemod, format).
-- You're prepared to review the resulting `git diff` before keeping it.
-- The task is well-scoped enough that the agent won't drift.
+- `<task>` — the concrete job and the relevant repository or failure context.
+- `<structured_output_contract>` or `<compact_output_contract>` — exact
+  shape, ordering, and brevity requirements.
+- `<default_follow_through_policy>` — what Cursor should do by default
+  instead of asking routine questions.
+- `<verification_loop>` or `<completeness_contract>` — required for
+  debugging, implementation, or risky fixes.
+- `<grounding_rules>` or `<missing_context_gating>` — required for review,
+  research, or anything that could drift into unsupported claims.
 
-# Structured-output contracts
+## When to add which blocks
 
-The `review` subcommand demands strict JSON. If you need similar discipline
-in a custom prompt:
+- Coding or debugging: `completeness_contract`, `verification_loop`,
+  `missing_context_gating`.
+- Review or adversarial review: `grounding_rules`,
+  `structured_output_contract`, `dig_deeper_nudge`.
+- Research or recommendation: `research_mode`, `grounding_rules`.
+- Write-capable tasks: `action_safety` so Cursor stays narrow and avoids
+  unrelated refactors.
 
-- State the schema inline (TypeScript syntax is fine).
-- End with `Output ONLY a single JSON object — no prose, no markdown
-  fences.` Cursor still sometimes wraps in fences; the parser strips them.
-- Validate the parsed object before trusting any field.
+## How to choose prompt shape
 
-# What to avoid
+- Use built-in `review` or `adversarial-review` commands when the job is
+  reviewing local git changes — those prompts already carry the contract.
+- Use `task` when the job is diagnosis, planning, research, or
+  implementation and you need direct control of the prompt.
+- Use `task --resume-last` for follow-up instructions on the same
+  Cursor thread. Send only the delta instruction unless the direction
+  has changed materially.
 
-- **Vague verbs** ("improve", "clean up", "refactor as needed"). Replace
-  with a concrete goal.
-- **Pasting whole files**. Cursor has the workspace; reference paths
-  instead.
-- **Stacking unrelated tasks**. One prompt = one task. Use multiple jobs
-  if you need to.
-- **Telling Cursor what tools to use**. Let it choose its tools.
+## Working rules
+
+- Prefer explicit prompt contracts over vague nudges.
+- Use the tag names from [references/prompt-blocks.md](references/prompt-blocks.md).
+- Don't raise reasoning or complexity first. Tighten the prompt and
+  verification rules before escalating.
+- Keep claims anchored to observed evidence. If something is a hypothesis,
+  say so.
+- Don't paste whole files — Cursor has the workspace. Reference paths.
+- Don't tell Cursor which tools to use. State the goal and let it choose.
+
+## Prompt assembly checklist
+
+1. Define the exact task and scope in `<task>`.
+2. Choose the smallest output contract that still makes the answer easy to use.
+3. Decide whether Cursor should keep going by default or stop on missing
+   high-risk details.
+4. Add verification, grounding, and safety blocks only where the task needs them.
+5. Remove redundant instructions before sending.
+
+Reusable blocks: [references/prompt-blocks.md](references/prompt-blocks.md).
+End-to-end templates: [references/cursor-prompt-recipes.md](references/cursor-prompt-recipes.md).
+Common failure modes: [references/cursor-prompt-antipatterns.md](references/cursor-prompt-antipatterns.md).
