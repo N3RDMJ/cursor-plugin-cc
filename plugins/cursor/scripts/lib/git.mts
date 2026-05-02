@@ -191,7 +191,10 @@ const COMPILED_EXTS = /\.(mjs|js|cjs)$/;
 const MAX_LISTED_FILES = 50;
 
 export function getSourceTree(cwd: string): string {
-  const out = runGit(cwd, ["ls-files"]);
+  // Pathspec pre-filter keeps the JS-side scan to candidate extensions
+  // only — important for monorepos where most tracked files are neither
+  // TypeScript nor compiled output.
+  const out = runGit(cwd, ["ls-files", "--", "*.mts", "*.ts", "*.tsx", "*.mjs", "*.js", "*.cjs"]);
   if (!out) return "";
 
   const files = out.split("\n").filter((f) => f.length > 0);
@@ -225,9 +228,7 @@ export function getSourceTree(cwd: string): string {
     appendFiles(lines, tests);
   }
   if (compiled.length > 0) {
-    // Per-file listing of compiled artifacts is pure noise: the prompt
-    // already says ignore .mjs/.js and full paths just bait the agent's
-    // curiosity. Surface the directories only.
+    // Listing every compiled artifact baits the agent into reading them.
     lines.push("Compiled output (do not read — use the source files above):");
     appendDirSummary(lines, compiled);
   }

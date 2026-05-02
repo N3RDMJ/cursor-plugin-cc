@@ -111,8 +111,6 @@ function buildContextHeader(workspaceRoot: string): string {
   const lines: string[] = [];
   const branch = getBranch(workspaceRoot);
   if (branch) lines.push(`Current branch: ${branch}`);
-  // Three commits is enough to disambiguate "what's recently happened"
-  // without bloating the prompt; older commits rarely change the answer.
   const commits = getRecentCommits(workspaceRoot, 3);
   if (commits.length > 0) {
     lines.push("Recent commits:");

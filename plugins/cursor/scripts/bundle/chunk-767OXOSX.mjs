@@ -202,7 +202,7 @@ var COMPILED_DIRS = /(?:^|\/)(?:bundle|dist|build|compiled|output)\//;
 var COMPILED_EXTS = /\.(mjs|js|cjs)$/;
 var MAX_LISTED_FILES = 50;
 function getSourceTree(cwd) {
-  const out = runGit(cwd, ["ls-files"]);
+  const out = runGit(cwd, ["ls-files", "--", "*.mts", "*.ts", "*.tsx", "*.mjs", "*.js", "*.cjs"]);
   if (!out) return "";
   const files = out.split("\n").filter((f) => f.length > 0);
   const source = [];
