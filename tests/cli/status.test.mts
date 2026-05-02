@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
-import { createJob, markFailed, markRunning } from "@plugin/lib/job-control.mjs";
+import { createJob, logJobLine, markFailed, markRunning } from "@plugin/lib/job-control.mjs";
 import { ensureStateDir, resolveStateDir } from "@plugin/lib/state.mjs";
 import { argv, captureIO } from "@test/helpers/io.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -68,6 +68,52 @@ describe("CLI: status --wait", () => {
     expect(code).toBe(1);
     expect(io.captured.stderr.join("")).toContain("status --wait timed out");
     expect(io.captured.stdout.join("")).toContain("status:     running");
+  });
+
+  it("includes a progress tail for a non-terminal job", async () => {
+    const stateDir = ensureStateDir(resolveStateDir(workDir));
+    const job = createJob(stateDir, { type: "task", prompt: "running" });
+    markRunning(stateDir, job.id, { agentId: "agent-x", runId: "run-x" });
+    for (const line of ["fetching repo", "running tests", "thinking", "step four", "step five"]) {
+      logJobLine(stateDir, job.id, line);
+    }
+
+    const io = captureIO(workDir);
+    const code = await companionMain(argv("status", job.id), io);
+    expect(code).toBe(0);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("progress:");
+    expect(out).toContain("fetching repo");
+    expect(out).toContain("step five");
+  });
+
+  it("omits the progress block for terminal jobs", async () => {
+    const stateDir = ensureStateDir(resolveStateDir(workDir));
+    const job = createJob(stateDir, { type: "task", prompt: "done" });
+    logJobLine(stateDir, job.id, "noisy log line");
+    markFailed(stateDir, job.id, "boom");
+
+    const io = captureIO(workDir);
+    const code = await companionMain(argv("status", job.id), io);
+    expect(code).toBe(0);
+    expect(io.captured.stdout.join("")).not.toContain("progress:");
+  });
+
+  it("includes the progress tail when --wait times out on a running job", async () => {
+    const stateDir = ensureStateDir(resolveStateDir(workDir));
+    const job = createJob(stateDir, { type: "task", prompt: "stuck" });
+    markRunning(stateDir, job.id, { agentId: "agent-y", runId: "run-y" });
+    logJobLine(stateDir, job.id, "still cooking");
+
+    const io = captureIO(workDir);
+    const code = await companionMain(
+      argv("status", job.id, "--wait", "--timeout-ms", "30", "--poll-ms", "10"),
+      io,
+    );
+    expect(code).toBe(1);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("progress:");
+    expect(out).toContain("still cooking");
   });
 
   it("--json with --wait emits the final job record on stdout", async () => {

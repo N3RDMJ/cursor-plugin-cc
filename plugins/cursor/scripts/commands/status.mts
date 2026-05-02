@@ -4,7 +4,7 @@ import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { getJob, type ListJobsFilter, listJobs, reconcileStaleJobs } from "../lib/job-control.mjs";
 import { renderJobTable } from "../lib/render.mjs";
-import { type JobStatus, type JobType, resolveStateDir } from "../lib/state.mjs";
+import { type JobStatus, type JobType, resolveStateDir, tailJobLog } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const VALID_TYPES = new Set<string>(["task", "review", "adversarial-review"]);
@@ -13,6 +13,7 @@ const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed"
 
 const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
 const DEFAULT_WAIT_POLL_MS = 1_000;
+const PROGRESS_TAIL_LINES = 15;
 
 const HELP = `cursor-companion status [<job-id>] [flags]
 
@@ -88,7 +89,7 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
         if (json) {
           io.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
         } else {
-          io.stdout.write(renderJobDetail(job));
+          io.stdout.write(renderJobDetail(job, stateDir));
         }
         return 1;
       }
@@ -96,7 +97,7 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
     if (json) {
       io.stdout.write(`${JSON.stringify(job, null, 2)}\n`);
     } else {
-      io.stdout.write(renderJobDetail(job));
+      io.stdout.write(renderJobDetail(job, stateDir));
     }
     return 0;
   }
@@ -140,7 +141,7 @@ export async function runStatus(args: readonly string[], io: CommandIO): Promise
   return 0;
 }
 
-function renderJobDetail(job: ReturnType<typeof getJob>): string {
+function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): string {
   if (!job) return "";
   const lines: string[] = [];
   lines.push(`id:         ${job.id}`);
@@ -162,6 +163,14 @@ function renderJobDetail(job: ReturnType<typeof getJob>): string {
   }
   if (job.prompt) {
     lines.push("", "prompt:", job.prompt);
+  }
+  // Surface a tail of the streaming log for non-terminal jobs so users can
+  // peek at progress without `result --log`.
+  if (!TERMINAL_STATUSES.has(job.status)) {
+    const tail = tailJobLog(stateDir, job.id, PROGRESS_TAIL_LINES);
+    if (tail) {
+      lines.push("", `progress: (last ${PROGRESS_TAIL_LINES} log lines)`, tail);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
