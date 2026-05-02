@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../../../plugins/cursor/scripts/lib/cursor-agent.mjs";
 import {
   compactText,
+  escapeMarkdownCell,
   fenceCodeBlock,
   formatDuration,
   jobAgentHandoffLines,
@@ -209,6 +210,21 @@ describe("renderReviewResult", () => {
       next_steps: [],
     });
     expect(out).toContain("**Findings:** _(none)_");
+  });
+});
+
+describe("escapeMarkdownCell", () => {
+  it("escapes pipes so the cell stays intact", () => {
+    expect(escapeMarkdownCell("a|b")).toBe("a\\|b");
+  });
+
+  it("escapes backslashes before pipes so existing `\\` in input cannot combine", () => {
+    expect(escapeMarkdownCell("a\\")).toBe("a\\\\");
+    expect(escapeMarkdownCell("a\\|b")).toBe("a\\\\\\|b");
+  });
+
+  it("leaves clean strings unchanged", () => {
+    expect(escapeMarkdownCell("plain text")).toBe("plain text");
   });
 });
 

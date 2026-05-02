@@ -265,7 +265,7 @@ function ageFromIso(iso, now = Date.now()) {
   return Number.isFinite(t) ? formatAge(now - t) : "?";
 }
 function escapeMarkdownCell(value) {
-  return value.replace(/\|/g, "\\|");
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 function fenceCodeBlock(content) {
   const longestRun = (content.match(/`+/g) ?? []).reduce((max, m) => Math.max(max, m.length), 0);

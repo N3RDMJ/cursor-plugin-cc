@@ -258,9 +258,13 @@ export function ageFromIso(iso: string, now: number = Date.now()): string {
   return Number.isFinite(t) ? formatAge(now - t) : "?";
 }
 
-/** Escape a `|` so a value can sit inside a Markdown table cell without breaking it. */
+/**
+ * Escape `\` and `|` so a value can sit inside a Markdown table cell without
+ * breaking it. Backslash is escaped first so a literal `\` from input doesn't
+ * combine with the inserted `\|` and turn into something else.
+ */
 export function escapeMarkdownCell(value: string): string {
-  return value.replace(/\|/g, "\\|");
+  return value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 /**
