@@ -1,4 +1,5 @@
 import {
+  TERMINAL_STATUSES,
   createJob,
   ensureStateDir,
   getDiff,
@@ -13,7 +14,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-3Z37EVW4.mjs";
+} from "./chunk-B3GESHAJ.mjs";
 
 // plugins/cursor/scripts/lib/args.mts
 var UsageError = class extends Error {
@@ -208,13 +209,8 @@ var TABLE_HEADERS = [
   { key: "summary", label: "Summary" },
   { key: "actions", label: "Actions" }
 ];
-var TERMINAL_STATUSES_FOR_RENDER = /* @__PURE__ */ new Set([
-  "completed",
-  "failed",
-  "cancelled"
-]);
 function formatJobTime(entry, now) {
-  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+  if (TERMINAL_STATUSES.has(entry.status)) {
     const start = entry.startedAt ? Date.parse(entry.startedAt) : Number.NaN;
     const finish = entry.finishedAt ? Date.parse(entry.finishedAt) : Number.NaN;
     if (Number.isFinite(start) && Number.isFinite(finish) && finish >= start) {
@@ -238,7 +234,7 @@ function formatJobTime(entry, now) {
   return `age: ${formatAge(ageMs)}`;
 }
 function formatJobActions(entry) {
-  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+  if (TERMINAL_STATUSES.has(entry.status)) {
     return `/cursor:result ${entry.id}`;
   }
   if (entry.status === "running" || entry.status === "pending") {
@@ -271,7 +267,7 @@ function ageFromIso(iso, now = Date.now()) {
   const t = Date.parse(iso);
   return Number.isFinite(t) ? formatAge(now - t) : "?";
 }
-function escapeMd(value) {
+function escapeMarkdownCell(value) {
   return value.replace(/\|/g, "\\|");
 }
 function renderJobTable(jobs, now = Date.now()) {
@@ -279,7 +275,7 @@ function renderJobTable(jobs, now = Date.now()) {
   const rows = rowsFromJobs(jobs, now);
   const header = `| ${TABLE_HEADERS.map((h) => h.label).join(" | ")} |`;
   const separator = `| ${TABLE_HEADERS.map(() => "---").join(" | ")} |`;
-  const body = rows.map((r) => `| ${TABLE_HEADERS.map((h) => escapeMd(r[h.key] ?? "")).join(" | ")} |`).join("\n");
+  const body = rows.map((r) => `| ${TABLE_HEADERS.map((h) => escapeMarkdownCell(r[h.key] ?? "")).join(" | ")} |`).join("\n");
   return `${header}
 ${separator}
 ${body}
@@ -601,6 +597,7 @@ export {
   renderStreamEvent,
   formatJobActions,
   ageFromIso,
+  escapeMarkdownCell,
   renderJobTable,
   renderReviewResult,
   jobAgentHandoffLines,

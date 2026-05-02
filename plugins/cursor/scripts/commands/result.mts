@@ -1,8 +1,8 @@
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, parseArgs } from "../lib/args.mjs";
-import { getJob, listJobs } from "../lib/job-control.mjs";
+import { getJob, listJobs, TERMINAL_STATUSES } from "../lib/job-control.mjs";
 import { jobAgentHandoffLines } from "../lib/render.mjs";
-import { type JobStatus, readJobLog, resolveStateDir } from "../lib/state.mjs";
+import { readJobLog, resolveStateDir } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const HELP = `cursor-companion result [<job-id>] [--log] [--json] [--help]
@@ -12,8 +12,6 @@ recent terminal job for the current workspace. With --log, print the
 streaming log captured while the run was alive. With --json, emit the full
 JobRecord.
 `;
-
-const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed", "cancelled"]);
 
 export async function runResult(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   const parsed = parseArgs(args, {

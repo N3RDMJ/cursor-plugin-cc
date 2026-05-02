@@ -2,14 +2,24 @@ import { setTimeout as sleep } from "node:timers/promises";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
 import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
-import { getJob, type ListJobsFilter, listJobs, reconcileStaleJobs } from "../lib/job-control.mjs";
-import { formatJobActions, jobAgentHandoffLines, renderJobTable } from "../lib/render.mjs";
+import {
+  getJob,
+  type ListJobsFilter,
+  listJobs,
+  reconcileStaleJobs,
+  TERMINAL_STATUSES,
+} from "../lib/job-control.mjs";
+import {
+  escapeMarkdownCell,
+  formatJobActions,
+  jobAgentHandoffLines,
+  renderJobTable,
+} from "../lib/render.mjs";
 import { type JobStatus, type JobType, resolveStateDir, tailJobLog } from "../lib/state.mjs";
 import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const VALID_TYPES = new Set<string>(["task", "review", "adversarial-review"]);
 const VALID_STATUSES = new Set<string>(["pending", "running", "completed", "failed", "cancelled"]);
-const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed", "cancelled"]);
 
 const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
 const DEFAULT_WAIT_POLL_MS = 1_000;
@@ -149,7 +159,7 @@ function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): stri
   lines.push("| Field | Value |");
   lines.push("| --- | --- |");
   const row = (label: string, value: string): void => {
-    lines.push(`| ${label} | ${value.replace(/\|/g, "\\|")} |`);
+    lines.push(`| ${label} | ${escapeMarkdownCell(value)} |`);
   };
   row("id", `\`${job.id}\``);
   row("type", `\`${job.type}\``);
@@ -165,13 +175,7 @@ function renderJobDetail(job: ReturnType<typeof getJob>, stateDir: string): stri
   if (job.metadata && Object.keys(job.metadata).length > 0) {
     row("metadata", `\`${JSON.stringify(job.metadata)}\``);
   }
-  const actions = formatJobActions({
-    id: job.id,
-    type: job.type,
-    status: job.status,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  });
+  const actions = formatJobActions(job);
   if (actions) row("actions", actions);
 
   const handoff = jobAgentHandoffLines(job.agentId);

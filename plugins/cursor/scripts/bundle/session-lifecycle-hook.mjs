@@ -11,7 +11,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeSession
-} from "./chunk-3Z37EVW4.mjs";
+} from "./chunk-B3GESHAJ.mjs";
 
 // plugins/cursor/scripts/session-lifecycle-hook.mts
 var SESSION_END_KEEP_ENV = "CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS";

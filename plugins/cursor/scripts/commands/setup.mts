@@ -11,6 +11,7 @@ import {
   whoami,
 } from "../lib/cursor-agent.mjs";
 import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
+import { escapeMarkdownCell } from "../lib/render.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
 import {
   clearDefaultModel,
@@ -161,10 +162,6 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
   }
 
   return report;
-}
-
-function escapeMarkdownCell(value: string): string {
-  return value.replace(/\|/g, "\\|");
 }
 
 function renderReport(report: SetupReport): string {

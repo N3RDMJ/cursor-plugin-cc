@@ -3,6 +3,7 @@ import {
   ageFromIso,
   bool,
   compactText,
+  escapeMarkdownCell,
   formatJobActions,
   interpolateTemplate,
   jobAgentHandoffLines,
@@ -15,9 +16,10 @@ import {
   renderStreamEvent,
   runReview,
   setGateEnabled
-} from "./chunk-AM4UUQ4G.mjs";
+} from "./chunk-VPB6G64I.mjs";
 import {
   DEFAULT_MODEL,
+  TERMINAL_STATUSES,
   buildAgentOptionsFromFlags,
   cancelJob,
   clearDefaultModel,
@@ -56,7 +58,7 @@ import {
   unregisterActiveRun,
   validateModel,
   whoami
-} from "./chunk-3Z37EVW4.mjs";
+} from "./chunk-B3GESHAJ.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -103,7 +105,6 @@ recent terminal job for the current workspace. With --log, print the
 streaming log captured while the run was alive. With --json, emit the full
 JobRecord.
 `;
-var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 async function runResult(args, io) {
   const parsed = parseArgs(args, {
     long: { log: "boolean", json: "boolean", help: "boolean" },
@@ -582,9 +583,6 @@ async function buildReport(input) {
   }
   return report;
 }
-function escapeMarkdownCell(value) {
-  return value.replace(/\|/g, "\\|");
-}
 function renderReport(report) {
   const lines = [];
   const yes = (ok) => ok ? "ok" : "fail";
@@ -816,7 +814,6 @@ async function runSetup(args, io) {
 import { setTimeout as sleep } from "node:timers/promises";
 var VALID_TYPES = /* @__PURE__ */ new Set(["task", "review", "adversarial-review"]);
 var VALID_STATUSES = /* @__PURE__ */ new Set(["pending", "running", "completed", "failed", "cancelled"]);
-var TERMINAL_STATUSES2 = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
 var DEFAULT_WAIT_TIMEOUT_MS = 24e4;
 var DEFAULT_WAIT_POLL_MS = 1e3;
 var PROGRESS_TAIL_LINES = 15;
@@ -876,16 +873,16 @@ async function runStatus(args, io) {
 `);
       return 1;
     }
-    if (wait && !TERMINAL_STATUSES2.has(job.status)) {
+    if (wait && !TERMINAL_STATUSES.has(job.status)) {
       const deadline = Date.now() + (timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS);
       const interval = pollMs ?? DEFAULT_WAIT_POLL_MS;
       while (Date.now() < deadline) {
         await sleep(interval);
         const fresh = getJob(stateDir, jobId);
         if (fresh) job = fresh;
-        if (TERMINAL_STATUSES2.has(job.status)) break;
+        if (TERMINAL_STATUSES.has(job.status)) break;
       }
-      if (!TERMINAL_STATUSES2.has(job.status)) {
+      if (!TERMINAL_STATUSES.has(job.status)) {
         io.stderr.write(`status --wait timed out (job still ${job.status})
 `);
         if (json) {
@@ -950,7 +947,7 @@ function renderJobDetail(job, stateDir) {
   lines.push("| Field | Value |");
   lines.push("| --- | --- |");
   const row = (label, value) => {
-    lines.push(`| ${label} | ${value.replace(/\|/g, "\\|")} |`);
+    lines.push(`| ${label} | ${escapeMarkdownCell(value)} |`);
   };
   row("id", `\`${job.id}\``);
   row("type", `\`${job.type}\``);
@@ -966,13 +963,7 @@ function renderJobDetail(job, stateDir) {
   if (job.metadata && Object.keys(job.metadata).length > 0) {
     row("metadata", `\`${JSON.stringify(job.metadata)}\``);
   }
-  const actions = formatJobActions({
-    id: job.id,
-    type: job.type,
-    status: job.status,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt
-  });
+  const actions = formatJobActions(job);
   if (actions) row("actions", actions);
   const handoff = jobAgentHandoffLines(job.agentId);
   if (handoff.length > 0) {
@@ -984,7 +975,7 @@ function renderJobDetail(job, stateDir) {
   if (job.prompt) {
     lines.push("", "**Prompt:**", "", "```", job.prompt, "```");
   }
-  if (!TERMINAL_STATUSES2.has(job.status)) {
+  if (!TERMINAL_STATUSES.has(job.status)) {
     const tail = tailJobLog(stateDir, job.id, PROGRESS_TAIL_LINES);
     if (tail) {
       lines.push(

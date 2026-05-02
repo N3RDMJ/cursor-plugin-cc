@@ -18,7 +18,11 @@ import {
   writeStateIndex,
 } from "./state.mjs";
 
-const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set(["completed", "failed", "cancelled"]);
+export const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set([
+  "completed",
+  "failed",
+  "cancelled",
+]);
 
 const STALE_JOB_TTL_MS = 30 * 60 * 1000;
 

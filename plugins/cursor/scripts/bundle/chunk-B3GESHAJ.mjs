@@ -730,7 +730,11 @@ function redactError(error) {
 }
 
 // plugins/cursor/scripts/lib/job-control.mts
-var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["completed", "failed", "cancelled"]);
+var TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+  "completed",
+  "failed",
+  "cancelled"
+]);
 var STALE_JOB_TTL_MS = 30 * 60 * 1e3;
 var JOB_ID_BYTES = 6;
 function newJobId(type) {
@@ -1011,6 +1015,7 @@ export {
   validateModel,
   toAgentEvents,
   redactError,
+  TERMINAL_STATUSES,
   createJob,
   getJob,
   listJobs,

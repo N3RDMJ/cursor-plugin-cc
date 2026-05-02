@@ -1,4 +1,5 @@
 import type { AgentEvent } from "./cursor-agent.mjs";
+import { TERMINAL_STATUSES } from "./job-control.mjs";
 import { redactError } from "./redact.mjs";
 import type { JobIndexEntry } from "./state.mjs";
 
@@ -177,12 +178,6 @@ const TABLE_HEADERS: Array<{ key: keyof JobTableRow; label: string }> = [
   { key: "actions", label: "Actions" },
 ];
 
-const TERMINAL_STATUSES_FOR_RENDER: ReadonlySet<string> = new Set([
-  "completed",
-  "failed",
-  "cancelled",
-]);
-
 /**
  * Compact duration label for the table's time column. Picks between elapsed
  * (active) and duration (terminal) and falls back to created-at age when the
@@ -193,7 +188,7 @@ const TERMINAL_STATUSES_FOR_RENDER: ReadonlySet<string> = new Set([
  * - Pending or otherwise:           `age:      <created→now>`
  */
 export function formatJobTime(entry: JobIndexEntry, now: number): string {
-  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+  if (TERMINAL_STATUSES.has(entry.status)) {
     const start = entry.startedAt ? Date.parse(entry.startedAt) : Number.NaN;
     const finish = entry.finishedAt ? Date.parse(entry.finishedAt) : Number.NaN;
     if (Number.isFinite(start) && Number.isFinite(finish) && finish >= start) {
@@ -219,12 +214,11 @@ export function formatJobTime(entry: JobIndexEntry, now: number): string {
 }
 
 /**
- * Suggest the most useful next slash command for a job row. Mirrors the
- * "actions" column codex-plugin-cc surfaces — keeps newcomers from having to
- * dig through `/help` to discover follow-ups.
+ * Suggest the most useful next slash command for a job row — keeps newcomers
+ * from having to dig through `/help` to discover follow-ups.
  */
-export function formatJobActions(entry: JobIndexEntry): string {
-  if (TERMINAL_STATUSES_FOR_RENDER.has(entry.status)) {
+export function formatJobActions(entry: Pick<JobIndexEntry, "id" | "status">): string {
+  if (TERMINAL_STATUSES.has(entry.status)) {
     return `/cursor:result ${entry.id}`;
   }
   if (entry.status === "running" || entry.status === "pending") {
@@ -268,7 +262,7 @@ export function ageFromIso(iso: string, now: number = Date.now()): string {
 }
 
 /** Escape a `|` so a value can sit inside a Markdown table cell without breaking it. */
-function escapeMd(value: string): string {
+export function escapeMarkdownCell(value: string): string {
   return value.replace(/\|/g, "\\|");
 }
 
@@ -282,7 +276,7 @@ export function renderJobTable(jobs: JobIndexEntry[], now: number = Date.now()):
   const header = `| ${TABLE_HEADERS.map((h) => h.label).join(" | ")} |`;
   const separator = `| ${TABLE_HEADERS.map(() => "---").join(" | ")} |`;
   const body = rows
-    .map((r) => `| ${TABLE_HEADERS.map((h) => escapeMd(r[h.key] ?? "")).join(" | ")} |`)
+    .map((r) => `| ${TABLE_HEADERS.map((h) => escapeMarkdownCell(r[h.key] ?? "")).join(" | ")} |`)
     .join("\n");
   return `${header}\n${separator}\n${body}\n`;
 }
