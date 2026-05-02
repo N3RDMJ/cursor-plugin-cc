@@ -191,7 +191,10 @@ const COMPILED_EXTS = /\.(mjs|js|cjs)$/;
 const MAX_LISTED_FILES = 50;
 
 export function getSourceTree(cwd: string): string {
-  const out = runGit(cwd, ["ls-files"]);
+  // Pathspec pre-filter keeps the JS-side scan to candidate extensions
+  // only — important for monorepos where most tracked files are neither
+  // TypeScript nor compiled output.
+  const out = runGit(cwd, ["ls-files", "--", "*.mts", "*.ts", "*.tsx", "*.mjs", "*.js", "*.cjs"]);
   if (!out) return "";
 
   const files = out.split("\n").filter((f) => f.length > 0);
@@ -225,8 +228,9 @@ export function getSourceTree(cwd: string): string {
     appendFiles(lines, tests);
   }
   if (compiled.length > 0) {
+    // Listing every compiled artifact baits the agent into reading them.
     lines.push("Compiled output (do not read — use the source files above):");
-    appendFiles(lines, compiled);
+    appendDirSummary(lines, compiled);
   }
 
   return lines.join("\n");
@@ -237,13 +241,17 @@ function appendFiles(lines: string[], files: string[]): void {
     for (const f of files) lines.push(`  ${f}`);
     return;
   }
+  appendDirSummary(lines, files);
+}
+
+function appendDirSummary(lines: string[], files: string[]): void {
   const dirs = new Map<string, number>();
   for (const f of files) {
     const dir = f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : ".";
     dirs.set(dir, (dirs.get(dir) ?? 0) + 1);
   }
   for (const [dir, count] of [...dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    lines.push(`  ${dir}/ (${count} files)`);
+    lines.push(`  ${dir}/ (${count} ${count === 1 ? "file" : "files"})`);
   }
 }
 

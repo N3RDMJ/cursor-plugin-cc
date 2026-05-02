@@ -111,7 +111,7 @@ function buildContextHeader(workspaceRoot: string): string {
   const lines: string[] = [];
   const branch = getBranch(workspaceRoot);
   if (branch) lines.push(`Current branch: ${branch}`);
-  const commits = getRecentCommits(workspaceRoot, 5);
+  const commits = getRecentCommits(workspaceRoot, 3);
   if (commits.length > 0) {
     lines.push("Recent commits:");
     for (const c of commits) {
