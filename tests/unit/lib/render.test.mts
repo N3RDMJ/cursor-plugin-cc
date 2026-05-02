@@ -139,14 +139,17 @@ describe("renderJobTable", () => {
         status: "running",
         createdAt: new Date(now - 3_600_000).toISOString(),
         updatedAt: new Date(now - 3_600_000).toISOString(),
+        phase: "investigating auth flow",
       },
     ];
     const out = renderJobTable(jobs, now);
     expect(out).toContain("ID");
     expect(out).toContain("STATUS");
+    expect(out).toContain("PHASE");
     expect(out).toContain("abc123");
     expect(out).toContain("30s");
     expect(out).toContain("1h");
+    expect(out).toContain("investigating auth flow");
   });
 });
 

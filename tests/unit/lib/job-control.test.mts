@@ -14,6 +14,7 @@ import {
   logJobLine,
   markFailed,
   markFinished,
+  markPhase,
   markRunning,
   registerActiveRun,
   unregisterActiveRun,
@@ -136,6 +137,46 @@ describe("state transitions", () => {
 
   it("update of a missing id throws", () => {
     expect(() => markFailed(stateDir, "missing-job", "x")).toThrow(/job not found/);
+  });
+});
+
+describe("markPhase", () => {
+  it("stamps the normalized phase on the job and surfaces it on the index entry", () => {
+    const job = createJob(stateDir, { type: "task", prompt: "x" });
+    const after = markPhase(stateDir, job.id, "  reading\nfile  ");
+    expect(after?.phase).toBe("reading file");
+    const listed = listJobs(stateDir).find((j) => j.id === job.id);
+    expect(listed?.phase).toBe("reading file");
+  });
+
+  it("truncates very long phases", () => {
+    const job = createJob(stateDir, { type: "task", prompt: "x" });
+    const after = markPhase(stateDir, job.id, "a".repeat(200));
+    expect(after?.phase?.length).toBe(80);
+    expect(after?.phase?.endsWith("...")).toBe(true);
+  });
+
+  it("no-ops when the phase is unchanged (no updatedAt bump)", async () => {
+    const job = createJob(stateDir, { type: "task", prompt: "x" });
+    const first = markPhase(stateDir, job.id, "thinking");
+    const firstUpdatedAt = first?.updatedAt;
+    await new Promise((r) => setTimeout(r, 5));
+    const second = markPhase(stateDir, job.id, "thinking");
+    expect(second?.updatedAt).toBe(firstUpdatedAt);
+  });
+
+  it("returns undefined for empty input or missing jobs", () => {
+    const job = createJob(stateDir, { type: "task", prompt: "x" });
+    expect(markPhase(stateDir, job.id, "   ")).toBeUndefined();
+    expect(markPhase(stateDir, "missing-job", "anything")).toBeUndefined();
+  });
+
+  it("does not modify a terminal job", () => {
+    const job = createJob(stateDir, { type: "task", prompt: "x" });
+    markFinished(stateDir, job.id, fakeResult({ status: "finished" }));
+    const after = markPhase(stateDir, job.id, "should-not-stick");
+    expect(after?.status).toBe("completed");
+    expect(after?.phase).toBeUndefined();
   });
 });
 

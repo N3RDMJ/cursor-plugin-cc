@@ -1,10 +1,11 @@
 import type { SDKAgent, SDKMessage } from "@cursor/sdk";
 
-import { disposeAgent, sendTask, toAgentEvents } from "./cursor-agent.mjs";
+import { type AgentEvent, disposeAgent, sendTask, toAgentEvents } from "./cursor-agent.mjs";
 import {
   logJobLine,
   markFailed,
   markFinished,
+  markPhase,
   markRunning,
   registerActiveRun,
   unregisterActiveRun,
@@ -32,6 +33,17 @@ export interface RunAgentTaskOptions {
 }
 
 /**
+ * Pull a phase string out of a task event. Prefers the model-supplied `text`
+ * (describes the work) over the SDK `status` (e.g. "started"). Returns undefined
+ * when neither field is present.
+ */
+function phaseFromEvent(event: AgentEvent): string | undefined {
+  if (event.type !== "task") return undefined;
+  const candidate = event.text ?? event.status;
+  return candidate && candidate.trim() !== "" ? candidate : undefined;
+}
+
+/**
  * Foreground run: stream the agent's events to stdout/stderr, persist job
  * transitions, dispose the agent on exit. Ownership of the agent passes to
  * this helper — callers must not dispose it themselves.
@@ -52,6 +64,8 @@ export async function runAgentTaskForeground(opts: RunAgentTaskOptions): Promise
       },
       onEvent: (event: SDKMessage) => {
         for (const ae of toAgentEvents(event)) {
+          const phase = phaseFromEvent(ae);
+          if (phase) markPhase(stateDir, jobId, phase);
           const rendered = renderStreamEvent(ae, { quietStatus: true, quietThinking: true });
           if (rendered.stdout) io.stdout.write(rendered.stdout);
           if (rendered.stderr) {
@@ -99,6 +113,8 @@ export function runAgentTaskBackground(opts: Omit<RunAgentTaskOptions, "io">): v
         },
         onEvent: (event: SDKMessage) => {
           for (const ae of toAgentEvents(event)) {
+            const phase = phaseFromEvent(ae);
+            if (phase) markPhase(stateDir, jobId, phase);
             const rendered = renderStreamEvent(ae);
             if (rendered.stdout) logJobLine(stateDir, jobId, rendered.stdout.replace(/\n$/, ""));
             if (rendered.stderr) logJobLine(stateDir, jobId, rendered.stderr.replace(/\n$/, ""));
