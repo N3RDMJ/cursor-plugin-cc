@@ -216,6 +216,21 @@ export function readJobLog(stateDir: string, jobId: string): string | undefined 
   }
 }
 
+/**
+ * Return the last `lines` lines of the per-job log, joined by `\n` with no
+ * trailing newline. Returns undefined when the log is missing or empty so
+ * callers can omit the section entirely.
+ */
+export function tailJobLog(stateDir: string, jobId: string, lines: number): string | undefined {
+  if (lines <= 0) return undefined;
+  const log = readJobLog(stateDir, jobId);
+  if (!log) return undefined;
+  const body = log.endsWith("\n") ? log.slice(0, -1) : log;
+  if (body.length === 0) return undefined;
+  const split = body.split("\n");
+  return (split.length <= lines ? split : split.slice(-lines)).join("\n");
+}
+
 export function readSession(stateDir: string): SessionState | undefined {
   return readJson<SessionState>(getSessionPath(stateDir));
 }

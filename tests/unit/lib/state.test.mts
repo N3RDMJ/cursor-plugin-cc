@@ -32,6 +32,7 @@ import {
   resolveStateDir,
   resolveStateRoot,
   STATE_ROOT_ENV,
+  tailJobLog,
   writeJob,
   writeJsonAtomic,
   writeSession,
@@ -207,6 +208,29 @@ describe("job records and logs", () => {
 
   it("readJobLog returns undefined when no log exists", () => {
     expect(readJobLog(stateDir, "ghost")).toBeUndefined();
+  });
+
+  it("tailJobLog returns the last N lines without a trailing newline", () => {
+    for (const i of [1, 2, 3, 4, 5]) appendJobLog(stateDir, "job-tail", `line${i}\n`);
+    expect(tailJobLog(stateDir, "job-tail", 3)).toBe("line3\nline4\nline5");
+  });
+
+  it("tailJobLog returns the entire log when fewer than N lines exist", () => {
+    appendJobLog(stateDir, "job-short", "only\n");
+    expect(tailJobLog(stateDir, "job-short", 10)).toBe("only");
+  });
+
+  it("tailJobLog handles a log without a trailing newline", () => {
+    appendJobLog(stateDir, "job-noeol", "a\nb\nc");
+    expect(tailJobLog(stateDir, "job-noeol", 2)).toBe("b\nc");
+  });
+
+  it("tailJobLog returns undefined for missing or empty logs and zero lines", () => {
+    expect(tailJobLog(stateDir, "ghost", 5)).toBeUndefined();
+    appendJobLog(stateDir, "job-empty", "");
+    expect(tailJobLog(stateDir, "job-empty", 5)).toBeUndefined();
+    appendJobLog(stateDir, "job-something", "x\n");
+    expect(tailJobLog(stateDir, "job-something", 0)).toBeUndefined();
   });
 });
 
