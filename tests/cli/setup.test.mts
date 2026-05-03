@@ -186,6 +186,16 @@ describe("CLI: setup", () => {
     expect(io.captured.stderr.join("")).toContain("mutually exclusive");
   });
 
+  it("--login explains keychain setup alternatives when no backend is available", async () => {
+    setBackendForTesting(null);
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--login"), io)).toBe(1);
+    const err = io.captured.stderr.join("");
+    expect(err).toContain("~/.claude/cursor-login");
+    expect(err).toContain("CURSOR_API_KEY");
+    expect(err).toContain("gnome-keyring");
+  });
+
   it("--logout fails gracefully when no backend", async () => {
     setBackendForTesting(null);
     const io = captureIO(workDir);

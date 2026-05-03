@@ -31,9 +31,17 @@ Use [Cursor](https://cursor.com) as a second AI agent from inside [Claude Code](
 
 **Set up your API key once:**
 
-Recommended: add `CURSOR_API_KEY` to your shell profile once, then start a new
-Claude Code session. Copy this command, replace `YOUR_CURSOR_API_KEY_HERE` with
-your actual Cursor API key, then paste it into your normal terminal:
+Recommended: store the key in your OS keychain with the local helper. Run this
+from a normal terminal (outside Claude Code); it prompts with masked input and
+keeps the key out of Claude Code chat:
+
+```bash
+~/.claude/cursor-login
+```
+
+If you prefer an environment variable, copy this command, replace
+`YOUR_CURSOR_API_KEY_HERE` with your actual Cursor API key, then paste it into
+your normal terminal:
 
 ```bash
 echo 'export CURSOR_API_KEY="YOUR_CURSOR_API_KEY_HERE"' >> ~/.bashrc
@@ -41,11 +49,10 @@ echo 'export CURSOR_API_KEY="YOUR_CURSOR_API_KEY_HERE"' >> ~/.bashrc
 
 Use `~/.zshrc` instead of `~/.bashrc` in the command if you use zsh.
 
-If you prefer OS keychain storage, run the local helper from a normal terminal.
-It prompts locally with masked input and keeps the key out of Claude Code chat:
+If keychain storage fails on WSL/Linux, install Secret Service support and retry:
 
 ```bash
-~/.claude/cursor-login
+sudo apt-get install gnome-keyring libsecret-tools dbus-user-session
 ```
 
 > [!WARNING]

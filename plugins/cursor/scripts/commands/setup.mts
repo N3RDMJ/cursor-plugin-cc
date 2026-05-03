@@ -317,10 +317,29 @@ async function readHiddenInput(io: CommandIO): Promise<string> {
   });
 }
 
+function keychainUnavailableMessage(detail?: string): string {
+  const lines = [
+    "Could not store the Cursor API key in the OS keychain.",
+    "",
+    "Recommended:",
+    "  1. Run the local keychain helper from a normal terminal:",
+    "     ~/.claude/cursor-login",
+    "  2. If keychain storage is not available, use CURSOR_API_KEY instead:",
+    "     echo 'export CURSOR_API_KEY=\"YOUR_CURSOR_API_KEY_HERE\"' >> ~/.bashrc",
+    "",
+    "On WSL/Linux, the keychain backend requires Secret Service. Install it with:",
+    "  sudo apt-get install gnome-keyring libsecret-tools dbus-user-session",
+  ];
+  if (detail) {
+    lines.push("", `Underlying error: ${detail}`);
+  }
+  return lines.join("\n");
+}
+
 async function runLogin(io: CommandIO, json: boolean): Promise<ExitCode> {
   const backend = detectBackend();
   if (!backend) {
-    const msg = "No supported keychain backend on this platform. Use CURSOR_API_KEY env instead.";
+    const msg = keychainUnavailableMessage("No supported keychain backend on this platform.");
     if (json) {
       io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
     } else {
@@ -354,7 +373,17 @@ async function runLogin(io: CommandIO, json: boolean): Promise<ExitCode> {
     return 1;
   }
 
-  await storeApiKey(key);
+  try {
+    await storeApiKey(key);
+  } catch (err) {
+    const msg = keychainUnavailableMessage(errorMessage(err));
+    if (json) {
+      io.stdout.write(`${JSON.stringify({ ok: false, error: msg })}\n`);
+    } else {
+      io.stderr.write(`${msg}\n`);
+    }
+    return 1;
+  }
 
   if (json) {
     io.stdout.write(
