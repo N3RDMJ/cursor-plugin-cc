@@ -285,11 +285,14 @@ npm run build         # tsc + esbuild bundle
 Tag-driven via GitHub Actions. Push a `v*` tag to run CI and create a release:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
-The plugin uses commit-SHA versioning (no hardcoded version in `plugin.json`), so every push to the marketplace source triggers auto-update for installed users.
+The plugin uses explicit semver in `plugins/cursor/.claude-plugin/plugin.json`.
+Claude Code only updates installed users when that `version` changes, so commits
+landing on `main` do not auto-load unless they are part of a version bump. The
+release workflow validates that the `v*` tag matches the plugin manifest version.
 
 ## FAQ
 

@@ -47,6 +47,18 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate plugin version matches tag
+        run: |
+          node -e '
+            const fs = require("fs");
+            const tagVersion = process.env.GITHUB_REF_NAME.replace(/^v/, "");
+            const manifest = JSON.parse(fs.readFileSync("plugins/cursor/.claude-plugin/plugin.json", "utf8"));
+            if (manifest.version !== tagVersion) {
+              console.error(`plugin.json version ${manifest.version} does not match tag ${tagVersion}`);
+              process.exit(1);
+            }
+          '
+
       - name: Generate release notes
         id: notes
         run: |
