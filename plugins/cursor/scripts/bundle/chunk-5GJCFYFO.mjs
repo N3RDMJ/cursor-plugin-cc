@@ -544,6 +544,10 @@ function formatModelSelection(model) {
   const pairs = [...model.params].sort((a, b) => a.id.localeCompare(b.id)).map((p) => `${p.id}=${p.value}`).join(",");
   return `${model.id}:${pairs}`;
 }
+function optionalModelArg(parsed, name) {
+  const raw = optionalString(parsed, name);
+  return raw ? parseModelArg(raw) : void 0;
+}
 
 // plugins/cursor/scripts/lib/user-config.mts
 var USER_CONFIG_ENV_MODEL = "CURSOR_MODEL";
@@ -584,7 +588,12 @@ function resolveDefaultModel(fallback, opts = {}) {
   if (envValue) {
     try {
       return { model: parseModelArg(envValue), source: "env" };
-    } catch {
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `cursor-plugin: ignoring malformed ${USER_CONFIG_ENV_MODEL}='${envValue}' (${detail})
+`
+      );
     }
   }
   const cfg = readUserConfig(opts);
@@ -1154,6 +1163,7 @@ export {
   getSourceTree,
   parseModelArg,
   formatModelSelection,
+  optionalModelArg,
   resolveStateDir,
   ensureStateDir,
   writeJsonAtomic,

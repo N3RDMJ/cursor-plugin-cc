@@ -5,7 +5,7 @@ import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
 import { getDiff, getStatus, type ReviewScope, resolveReviewTarget } from "../lib/git.mjs";
 import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
-import { parseModelArg } from "../lib/model-arg.mjs";
+import { optionalModelArg } from "../lib/model-arg.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { type ReviewOutput, renderReviewResult } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -97,8 +97,8 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const modelArg = optionalString(parsed, "model");
-  if (modelArg) flags.model = parseModelArg(modelArg);
+  const model = optionalModelArg(parsed, "model");
+  if (model) flags.model = model;
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

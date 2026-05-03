@@ -10,16 +10,16 @@ import {
   markFinished,
   markRunning,
   oneShot,
+  optionalModelArg,
   optionalString,
   parseArgs,
-  parseModelArg,
   readJson,
   redactError,
   resolveReviewTarget,
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-SFBCFJHY.mjs";
+} from "./chunk-5GJCFYFO.mjs";
 
 // plugins/cursor/scripts/lib/render.mts
 function formatDuration(ms) {
@@ -400,8 +400,8 @@ function parseFlags(args) {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const modelArg = optionalString(parsed, "model");
-  if (modelArg) flags.model = parseModelArg(modelArg);
+  const model = optionalModelArg(parsed, "model");
+  if (model) flags.model = model;
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

@@ -65,10 +65,13 @@ export function resolveDefaultModel(
   if (envValue) {
     try {
       return { model: parseModelArg(envValue), source: "env" };
-    } catch {
-      /* malformed env value falls through to config / fallback rather than
-         crashing every command — `/cursor:setup` reports the resolved
-         default so users still see what's in effect. */
+    } catch (err) {
+      // Don't crash every command on a typo — fall through to the persisted
+      // default, but warn so the user knows their env var was ignored.
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `cursor-plugin: ignoring malformed ${USER_CONFIG_ENV_MODEL}='${envValue}' (${detail})\n`,
+      );
     }
   }
 

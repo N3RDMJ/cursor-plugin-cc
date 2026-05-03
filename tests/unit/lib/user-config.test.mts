@@ -12,7 +12,7 @@ import {
   USER_CONFIG_ENV_MODEL,
   writeUserConfig,
 } from "@plugin/lib/user-config.mjs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let stateRoot: string;
 let savedRoot: string | undefined;
@@ -149,10 +149,19 @@ describe("resolveDefaultModel resolution order", () => {
     });
   });
 
-  it("falls through to config when CURSOR_MODEL is malformed", () => {
+  it("falls through to config when CURSOR_MODEL is malformed and warns on stderr", () => {
     setDefaultModel({ id: "from-config" });
     process.env[USER_CONFIG_ENV_MODEL] = "gpt-5:bad-param-no-equals";
-    const resolved = resolveDefaultModel(fallback);
-    expect(resolved).toEqual({ model: { id: "from-config" }, source: "config" });
+    const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
+    try {
+      const resolved = resolveDefaultModel(fallback);
+      expect(resolved).toEqual({ model: { id: "from-config" }, source: "config" });
+      expect(stderr).toHaveBeenCalledTimes(1);
+      const warning = String(stderr.mock.calls[0]?.[0] ?? "");
+      expect(warning).toContain("CURSOR_MODEL");
+      expect(warning).toContain("gpt-5:bad-param-no-equals");
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

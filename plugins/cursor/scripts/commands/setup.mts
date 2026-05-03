@@ -102,12 +102,7 @@ export function modelChoices(models: Awaited<ReturnType<typeof listModels>>): Mo
     }
     for (const variant of variants) {
       const selection: ModelSelection = { id: model.id, params: variant.params };
-      const key = JSON.stringify({
-        id: selection.id,
-        params: [...(selection.params ?? [])]
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((p) => `${p.id}=${p.value}`),
-      });
+      const key = formatModelSelection(selection);
       if (seen.has(key)) continue;
       seen.add(key);
       const variantLabel = variant.displayName.trim();

@@ -13,7 +13,7 @@ import {
 } from "../lib/cursor-agent.mjs";
 import { getBranch, getRecentCommits, getSourceTree } from "../lib/git.mjs";
 import { createJob, findRecentTaskAgents, markFailed } from "../lib/job-control.mjs";
-import { parseModelArg } from "../lib/model-arg.mjs";
+import { optionalModelArg } from "../lib/model-arg.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -104,8 +104,8 @@ function parseFlags(args: readonly string[], cwd: string): TaskFlags {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json"),
   };
-  const modelArg = optionalString(parsed, "model");
-  if (modelArg) flags.model = parseModelArg(modelArg);
+  const model = optionalModelArg(parsed, "model");
+  if (model) flags.model = model;
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

@@ -14,7 +14,7 @@ import {
   renderTaskResultCard,
   runReview,
   setGateEnabled
-} from "./chunk-TQA64WTQ.mjs";
+} from "./chunk-GFSYWFX6.mjs";
 import {
   DEFAULT_MODEL,
   RUN_NOT_ACTIVE_REASON,
@@ -44,6 +44,7 @@ import {
   markFinished,
   markPhase,
   markRunning,
+  optionalModelArg,
   optionalString,
   parseArgs,
   parseModelArg,
@@ -65,7 +66,7 @@ import {
   validateModel,
   whoami,
   writeJsonAtomic
-} from "./chunk-SFBCFJHY.mjs";
+} from "./chunk-5GJCFYFO.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -395,8 +396,8 @@ function parseFlags(args) {
     cloud,
     json
   };
-  const modelArg = optionalString(parsed, "model");
-  if (modelArg) flags.model = parseModelArg(modelArg);
+  const model = optionalModelArg(parsed, "model");
+  if (model) flags.model = model;
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
@@ -773,10 +774,7 @@ function modelChoices(models) {
     }
     for (const variant of variants) {
       const selection = { id: model.id, params: variant.params };
-      const key = JSON.stringify({
-        id: selection.id,
-        params: [...selection.params ?? []].sort((a, b) => a.id.localeCompare(b.id)).map((p) => `${p.id}=${p.value}`)
-      });
+      const key = formatModelSelection(selection);
       if (seen.has(key)) continue;
       seen.add(key);
       const variantLabel = variant.displayName.trim();
@@ -1412,8 +1410,8 @@ function parseFlags2(args, cwd) {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json")
   };
-  const modelArg = optionalString(parsed, "model");
-  if (modelArg) flags.model = parseModelArg(modelArg);
+  const model = optionalModelArg(parsed, "model");
+  if (model) flags.model = model;
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

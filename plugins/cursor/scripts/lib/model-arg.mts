@@ -1,6 +1,6 @@
 import type { ModelSelection } from "@cursor/sdk";
 
-import { UsageError } from "./args.mjs";
+import { optionalString, type ParsedArgs, UsageError } from "./args.mjs";
 
 /**
  * Parse a `--model` / `--set-model` / `CURSOR_MODEL` value into a
@@ -9,10 +9,6 @@ import { UsageError } from "./args.mjs";
  *   gpt-5
  *   gpt-5:reasoning_effort=low
  *   gpt-5:reasoning_effort=low,verbosity=high
- *
- * Bare ids stay backwards compatible. Param keys/values are non-empty and
- * the id may not contain `:` (we split on the first `:`, so a colon inside
- * the id would be rejected).
  */
 export function parseModelArg(input: string): ModelSelection {
   const trimmed = input.trim();
@@ -56,9 +52,9 @@ export function parseModelArg(input: string): ModelSelection {
 }
 
 /**
- * Render a `ModelSelection` back into the canonical `id[:k=v,k=v]` form so
- * reports and logs can echo what the user supplied. Params are emitted in
- * sorted order for stable output.
+ * Render a `ModelSelection` back into the canonical `id[:k=v,k=v]` form.
+ * Params are sorted by key so the output is stable across runs and usable
+ * as a dedup key.
  */
 export function formatModelSelection(model: ModelSelection): string {
   if (!model.params || model.params.length === 0) return model.id;
@@ -67,4 +63,10 @@ export function formatModelSelection(model: ModelSelection): string {
     .map((p) => `${p.id}=${p.value}`)
     .join(",");
   return `${model.id}:${pairs}`;
+}
+
+/** Pull a `--model`-style flag off `ParsedArgs` and parse it. */
+export function optionalModelArg(parsed: ParsedArgs, name: string): ModelSelection | undefined {
+  const raw = optionalString(parsed, name);
+  return raw ? parseModelArg(raw) : undefined;
 }
