@@ -29,14 +29,26 @@ Use [Cursor](https://cursor.com) as a second AI agent from inside [Claude Code](
 /reload-plugins
 ```
 
-**Set up your API key:**
+**Set up your API key once:**
+
+Recommended: export `CURSOR_API_KEY` in your shell profile, then start a new
+Claude Code session:
 
 ```bash
-/cursor:setup --login
+export CURSOR_API_KEY="key_..."
 ```
 
-> [!TIP]
-> You can also export `CURSOR_API_KEY` in your shell profile instead of using the OS keychain.
+If you prefer OS keychain storage, run the local helper from a normal terminal.
+It prompts locally with masked input and keeps the key out of Claude Code chat:
+
+```bash
+~/.claude/cursor-login
+```
+
+> [!WARNING]
+> Avoid pasting API keys into Claude Code conversations. Chat-pasted keys can be
+> visible in session transcripts and travel through Claude Code's normal prompt
+> flow. Use `CURSOR_API_KEY` or `~/.claude/cursor-login` instead.
 
 **Verify:**
 
@@ -149,7 +161,7 @@ Validate runtime configuration and manage credentials, the review gate, and the 
 
 ```bash
 /cursor:setup                     # self-check
-/cursor:setup --login             # store API key in OS keychain
+/cursor:setup --login             # store API key in OS keychain (local terminal recommended)
 /cursor:setup --logout            # remove stored key
 /cursor:setup --install           # reinstall SDK dependencies
 /cursor:setup --enable-gate       # enable Stop review gate
@@ -206,7 +218,10 @@ The plugin wraps [`@cursor/sdk`](https://www.npmjs.com/package/@cursor/sdk) to c
 | 2 | OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) |
 | 3 | Error with setup instructions |
 
-API keys are scrubbed from all logs and error output.
+For the easiest durable setup, put `CURSOR_API_KEY` in your shell profile or use
+`~/.claude/cursor-login` once to store it in the OS keychain. API keys are
+scrubbed from plugin logs and error output, but you should still avoid pasting
+keys into Claude Code chat because chat text can appear in session transcripts.
 
 ### Model Resolution
 
