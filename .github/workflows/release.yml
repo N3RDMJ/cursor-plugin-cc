@@ -71,13 +71,25 @@ jobs:
             RANGE="HEAD"
           fi
 
+          CHANGELOG_BODY="$(
+            awk -v version="${{ steps.version.outputs.version }}" '
+              $0 ~ "^## v" version "([[:space:]-]|$)" { capture=1; next }
+              capture && /^## / { exit }
+              capture { print }
+            ' CHANGELOG.md | sed '/./,$!d'
+          )"
+
           {
             echo 'body<<RELEASE_EOF'
-            echo "## What's Changed"
-            echo ""
-            git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
-            echo ""
-            echo ""
+            if [ -n "$CHANGELOG_BODY" ]; then
+              printf '%s\n\n' "$CHANGELOG_BODY"
+            else
+              echo "## What's Changed"
+              echo ""
+              git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
+              echo ""
+              echo ""
+            fi
             echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD | head -1)}...${{ github.ref_name }}"
             echo 'RELEASE_EOF'
           } >> "$GITHUB_OUTPUT"
