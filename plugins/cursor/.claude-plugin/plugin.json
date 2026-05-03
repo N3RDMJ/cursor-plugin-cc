@@ -1,6 +1,5 @@
 {
   "name": "cursor",
-  "version": "0.1.0",
   "description": "Use Cursor from Claude Code to review code or delegate tasks.",
   "author": { "name": "N3RDMJ" }
 }
