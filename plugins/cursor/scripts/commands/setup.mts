@@ -52,7 +52,7 @@ SDK installation:
 
 Credential management:
   --login              Store a Cursor API key in the OS keychain.
-                       Reads from stdin (pipe or interactive hidden input).
+                       Reads from stdin (pipe or interactive TTY; input masked as *).
                        Validates via Cursor.me() before storing.
   --logout             Remove the stored key from the OS keychain.
 
@@ -281,22 +281,36 @@ async function readHiddenInput(io: CommandIO): Promise<string> {
     stdin.setEncoding("utf8");
     stdin.resume();
     let buf = "";
-    const onData = (ch: string) => {
-      if (ch === "\n" || ch === "\r" || ch === "") {
-        stdin.setRawMode(prev);
-        stdin.pause();
-        stdin.removeListener("data", onData);
-        io.stderr.write("\n");
-        resolve(buf.trim());
-      } else if (ch === "") {
-        stdin.setRawMode(prev);
-        stdin.pause();
-        stdin.removeListener("data", onData);
-        reject(new Error("Aborted"));
-      } else if (ch === "" || ch === "\b") {
-        buf = buf.slice(0, -1);
-      } else {
+    const onData = (chunk: Buffer | string) => {
+      const str = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
+      for (const ch of str) {
+        if (ch === "\n" || ch === "\r" || ch === "\u0004") {
+          stdin.setRawMode(!!prev);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          io.stderr.write("\n");
+          resolve(buf.trim());
+          return;
+        }
+        if (ch === "\u0003") {
+          stdin.setRawMode(!!prev);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          reject(new Error("Aborted"));
+          return;
+        }
+        if (ch === "\u007f" || ch === "\b") {
+          if (buf.length > 0) {
+            buf = buf.slice(0, -1);
+            io.stderr.write("\b \b");
+          }
+          continue;
+        }
+        const code = ch.codePointAt(0) ?? 0;
+        /* Skip other control characters (including paste noise). */
+        if (code < 32 && ch !== "\t") continue;
         buf += ch;
+        io.stderr.write("*");
       }
     };
     stdin.on("data", onData);

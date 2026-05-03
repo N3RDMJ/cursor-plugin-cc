@@ -1,7 +1,7 @@
 ---
 description: Validate the cursor-plugin-cc runtime — Node, SDK, API key, account, models. Manage credentials and the Stop review gate.
 argument-hint: '[--install] [--login|--logout] [--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
-allowed-tools: Bash(node:*), Bash(printf:*), Bash(rm:*)
+allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
 
@@ -25,31 +25,39 @@ Surface the output verbatim. On success the next `/cursor:setup` should show
 
 ## When `--login` is passed
 
-Do NOT run the CLI directly. Ask the user to paste their Cursor API key in
-the conversation. Before they paste, warn them:
+Do **not** ask for the Cursor API key in chat by default. First give a strong
+warning and recommend one of the local setup paths:
 
-"Paste your Cursor API key below. It will be visible in this conversation's
-transcript, but will be validated and stored securely in your OS keychain."
+"Do not paste your Cursor API key into this Claude Code conversation unless you
+are comfortable with it being visible in the session transcript and sent through
+Claude Code's normal prompt flow. The safer options are:
 
-Once the user provides the key, write it to a temp file and pipe it to the
-CLI so it stays out of shell history and process arguments:
+1. Set it once in your shell profile as `CURSOR_API_KEY`, then restart Claude Code.
+2. Run `~/.claude/cursor-login` from a separate terminal, which prompts locally
+   with masked input and stores the key in the OS keychain."
 
-```bash
-printf '%s' '<THE_KEY>' > /tmp/.cursor-key-$$ && node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login < /tmp/.cursor-key-$$ ; rm -f /tmp/.cursor-key-$$
-```
-
-Report the result to the user. If it succeeded, tell them the key is stored
-in their OS keychain and they can verify with `/cursor:setup`. If it failed,
-relay the error.
-
-**Do not** echo the key back or include it in any output beyond the command.
-
-Alternatively, mention the user can run this from a separate terminal for
-secure hidden input (the key is never visible):
+Show the script command as the recommended `--login` path:
 
 ```
 ~/.claude/cursor-login
 ```
+
+If the user wants the environment-variable path, give them a readable command
+they can copy, replace the placeholder value in, and run in their normal
+terminal:
+
+```bash
+echo 'export CURSOR_API_KEY="YOUR_CURSOR_API_KEY_HERE"' >> ~/.bashrc
+```
+
+Tell them to replace `YOUR_CURSOR_API_KEY_HERE` with their Cursor API key, use
+`~/.zshrc` instead if they use zsh, and start a new Claude Code session
+afterward.
+
+If the user asks to paste the key into chat anyway, repeat that this exposes the
+key to the Claude Code transcript and normal prompt flow. Do not handle the key
+in-chat unless the user explicitly accepts that risk; prefer directing them to
+the local script or environment-variable setup.
 
 ## When `--logout` is passed
 
@@ -77,9 +85,15 @@ If the **SDK** row is `fail`, recommend `/cursor:setup --install` as the
 remediation. The default report includes a remediation hint at the bottom in
 that case.
 
-If the **API key** row is `fail`, immediately ask the user to paste their
-Cursor API key. Follow the same flow described in the `--login` section above.
-Do not make the user run `/cursor:setup --login` as a separate step.
+If the **API key** row is `fail`, do **not** immediately ask the user to paste
+their Cursor API key. Recommend the set-once options first:
+
+1. `CURSOR_API_KEY` in their shell profile, then restart Claude Code.
+2. `~/.claude/cursor-login` in a separate terminal for local masked input and OS
+   keychain storage.
+
+Mention paste-in-chat only as a last resort, with the strong warning from the
+`--login` section.
 
 ## Credential management
 
@@ -91,8 +105,10 @@ The plugin resolves the Cursor API key in this order:
 
 Manage the keychain credential via:
 
-- `--login` — asks for the API key in chat, validates via `Cursor.me()`,
-  and stores it in the OS keychain.
+- `CURSOR_API_KEY` — recommended set-once path. Add it to a shell profile or a
+  local environment manager before starting Claude Code.
+- `--login` — local OS-keychain storage. Prefer `~/.claude/cursor-login` from a
+  separate terminal so the key is entered locally with masked input.
 - `--logout` — remove the stored key from the OS keychain.
 
 The setup output's "API key" row reports the active key source (`env`,
