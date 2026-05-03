@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: lint + typecheck + build + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Biome (lint + format)
+        run: npm run check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit + CLI tests
+        run: npm test
+        env:
+          CURSOR_API_KEY: ""
+
+  release:
+    name: GitHub Release
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          # Get the previous tag (if any)
+          PREV_TAG=$(git tag --sort=-v:refname | sed -n '2p')
+          if [ -n "$PREV_TAG" ]; then
+            echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+            RANGE="$PREV_TAG..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          {
+            echo 'body<<RELEASE_EOF'
+            echo "## What's Changed"
+            echo ""
+            git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
+            echo ""
+            echo ""
+            echo "**Full changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD | head -1)}...${{ github.ref_name }}"
+            echo 'RELEASE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.notes.outputs.body }}
+          generate_release_notes: false
