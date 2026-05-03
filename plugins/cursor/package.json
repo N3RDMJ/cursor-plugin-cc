@@ -1,6 +1,5 @@
 {
   "name": "@cursor-plugin-cc/cursor",
-  "version": "0.1.0",
   "private": true,
   "description": "Claude Code plugin entry — see scripts/ for the CLI.",
   "type": "module",
