@@ -32,9 +32,9 @@ warning and recommend one of the local setup paths:
 are comfortable with it being visible in the session transcript and sent through
 Claude Code's normal prompt flow. The safer options are:
 
-1. Set it once in your shell profile as `CURSOR_API_KEY`, then restart Claude Code.
-2. Run `~/.claude/cursor-login` from a separate terminal, which prompts locally
-   with masked input and stores the key in the OS keychain."
+1. Run `~/.claude/cursor-login` from a separate terminal, which prompts locally
+   with masked input and stores the key in the OS keychain.
+2. Set it once in your shell profile as `CURSOR_API_KEY`, then restart Claude Code."
 
 Show the script command as the recommended `--login` path:
 
@@ -42,8 +42,8 @@ Show the script command as the recommended `--login` path:
 ~/.claude/cursor-login
 ```
 
-If the user wants the environment-variable path, give them a readable command
-they can copy, replace the placeholder value in, and run in their normal
+If the user wants the environment-variable path instead, give them a readable
+command they can copy, replace the placeholder value in, and run in their normal
 terminal:
 
 ```bash
@@ -88,9 +88,9 @@ that case.
 If the **API key** row is `fail`, do **not** immediately ask the user to paste
 their Cursor API key. Recommend the set-once options first:
 
-1. `CURSOR_API_KEY` in their shell profile, then restart Claude Code.
-2. `~/.claude/cursor-login` in a separate terminal for local masked input and OS
+1. `~/.claude/cursor-login` in a separate terminal for local masked input and OS
    keychain storage.
+2. `CURSOR_API_KEY` in their shell profile, then restart Claude Code.
 
 Mention paste-in-chat only as a last resort, with the strong warning from the
 `--login` section.
@@ -105,10 +105,10 @@ The plugin resolves the Cursor API key in this order:
 
 Manage the keychain credential via:
 
-- `CURSOR_API_KEY` — recommended set-once path. Add it to a shell profile or a
-  local environment manager before starting Claude Code.
-- `--login` — local OS-keychain storage. Prefer `~/.claude/cursor-login` from a
-  separate terminal so the key is entered locally with masked input.
+- `--login` — recommended set-once keychain path. Prefer `~/.claude/cursor-login`
+  from a separate terminal so the key is entered locally with masked input.
+- `CURSOR_API_KEY` — environment-variable fallback. Add it to a shell profile or
+  a local environment manager before starting Claude Code.
 - `--logout` — remove the stored key from the OS keychain.
 
 The setup output's "API key" row reports the active key source (`env`,

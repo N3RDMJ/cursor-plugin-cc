@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## v1.0.2 - 2026-05-03
+
+### Changed
+
+- Made `~/.claude/cursor-login` the primary recommended setup path for storing the Cursor API key in the OS keychain.
+- Clarified the README and `/cursor:setup` guidance with explicit keychain and environment-variable commands.
+- Improved `--login` failure output with keychain troubleshooting, including WSL/Linux Secret Service package guidance.
+
 ## v1.0.1 - 2026-05-03
 
 ### Added
