@@ -721,7 +721,7 @@ SDK installation:
 
 Credential management:
   --login              Store a Cursor API key in the OS keychain.
-                       Reads from stdin (pipe or interactive hidden input).
+                       Reads from stdin (pipe or interactive TTY; input masked as *).
                        Validates via Cursor.me() before storing.
   --logout             Remove the stored key from the OS keychain.
 
@@ -904,22 +904,35 @@ async function readHiddenInput(io) {
     stdin.setEncoding("utf8");
     stdin.resume();
     let buf = "";
-    const onData = (ch) => {
-      if (ch === "\n" || ch === "\r" || ch === "") {
-        stdin.setRawMode(prev);
-        stdin.pause();
-        stdin.removeListener("data", onData);
-        io.stderr.write("\n");
-        resolve(buf.trim());
-      } else if (ch === "") {
-        stdin.setRawMode(prev);
-        stdin.pause();
-        stdin.removeListener("data", onData);
-        reject(new Error("Aborted"));
-      } else if (ch === "\x7F" || ch === "\b") {
-        buf = buf.slice(0, -1);
-      } else {
+    const onData = (chunk) => {
+      const str = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : chunk;
+      for (const ch of str) {
+        if (ch === "\n" || ch === "\r" || ch === "") {
+          stdin.setRawMode(!!prev);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          io.stderr.write("\n");
+          resolve(buf.trim());
+          return;
+        }
+        if (ch === "") {
+          stdin.setRawMode(!!prev);
+          stdin.pause();
+          stdin.removeListener("data", onData);
+          reject(new Error("Aborted"));
+          return;
+        }
+        if (ch === "\x7F" || ch === "\b") {
+          if (buf.length > 0) {
+            buf = buf.slice(0, -1);
+            io.stderr.write("\b \b");
+          }
+          continue;
+        }
+        const code = ch.codePointAt(0) ?? 0;
+        if (code < 32 && ch !== "	") continue;
         buf += ch;
+        io.stderr.write("*");
       }
     };
     stdin.on("data", onData);
