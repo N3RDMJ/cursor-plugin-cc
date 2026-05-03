@@ -31,6 +31,15 @@ Execution mode rules:
   - `Wait for results`
   - `Run in background`
 
+Gate behavior (only one `AskUserQuestion` fires per `/cursor:review`):
+
+- The wait/background gate above is the only prompt this command issues.
+- To skip it entirely, pass `--wait` or `--background` explicitly.
+- `/cursor:task` has its own resume gate. Running these commands back-to-back
+  can produce two consecutive prompts (one from each command); pass the
+  suppressing flags (`--wait`/`--background` here, `--resume-last`/`--fresh`
+  on task) to skip them when chaining.
+
 Argument handling:
 - `--wait` and `--background` are execution-mode flags for Claude Code, not for the companion script. Strip them from the arguments before invoking the companion. The companion does not accept these flags.
 - Preserve all other user arguments exactly (`--staged`, `--scope`, `--base`, `--model`, `--timeout`, `--json`).

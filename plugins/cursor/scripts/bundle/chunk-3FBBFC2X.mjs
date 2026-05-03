@@ -735,6 +735,7 @@ var TERMINAL_STATUSES = /* @__PURE__ */ new Set([
   "failed",
   "cancelled"
 ]);
+var RUN_NOT_ACTIVE_REASON = "run-not-active";
 var STALE_JOB_TTL_MS = 30 * 60 * 1e3;
 var JOB_ID_BYTES = 6;
 function newJobId(type) {
@@ -925,8 +926,8 @@ async function cancelJob(stateDir, jobId) {
   }
   const run = activeRuns.get(jobId);
   if (!run) {
-    const updated2 = markCancelled(stateDir, jobId, "run-not-active");
-    return { cancelled: true, reason: "run-not-active", job: updated2 };
+    const updated2 = markCancelled(stateDir, jobId, RUN_NOT_ACTIVE_REASON);
+    return { cancelled: true, reason: RUN_NOT_ACTIVE_REASON, job: updated2 };
   }
   const result = await cancelRun(run);
   if (!result.cancelled) {
@@ -1016,6 +1017,7 @@ export {
   toAgentEvents,
   redactError,
   TERMINAL_STATUSES,
+  RUN_NOT_ACTIVE_REASON,
   createJob,
   getJob,
   listJobs,

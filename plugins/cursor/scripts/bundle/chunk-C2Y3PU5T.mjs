@@ -14,7 +14,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-B3GESHAJ.mjs";
+} from "./chunk-3FBBFC2X.mjs";
 
 // plugins/cursor/scripts/lib/args.mts
 var UsageError = class extends Error {
@@ -100,6 +100,11 @@ function bool(parsed, name) {
 }
 
 // plugins/cursor/scripts/lib/render.mts
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "0ms";
+  if (ms < 1e3) return `${Math.round(ms)}ms`;
+  return `${(ms / 1e3).toFixed(1)}s`;
+}
 function compactText(text) {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -331,6 +336,52 @@ function jobAgentHandoffLines(agentId) {
     `- Continue from Claude Code: \`/cursor:resume ${agentId}\``,
     `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``
   ];
+}
+function renderTaskResultCard(job) {
+  const lines = [];
+  lines.push(`**Job:** \`${job.id}\` _(type: ${job.type})_`);
+  const statusBits = [`\`${job.status}\``];
+  if (typeof job.durationMs === "number") {
+    statusBits.push(`duration: ${formatDuration(job.durationMs)}`);
+  } else if (job.startedAt && job.finishedAt) {
+    const start = Date.parse(job.startedAt);
+    const finish = Date.parse(job.finishedAt);
+    if (Number.isFinite(start) && Number.isFinite(finish) && finish >= start) {
+      statusBits.push(`duration: ${formatDuration(finish - start)}`);
+    }
+  }
+  lines.push(`**Status:** ${statusBits.join(" \u2014 ")}`);
+  if (job.agentId) lines.push(`**Agent:** \`${job.agentId}\``);
+  if (job.runId) lines.push(`**Run:** \`${job.runId}\``);
+  const meta = job.metadata;
+  if (meta) {
+    if (meta.timedOut === true) {
+      lines.push("**Note:** run exceeded its timeout and was cancelled by the plugin.");
+    }
+    if (meta.expired === true) {
+      lines.push("**Note:** SDK reported the run as expired (wedged local agent).");
+    }
+    if (typeof meta.cancelReason === "string" && meta.cancelReason) {
+      lines.push(`**Cancel reason:** \`${meta.cancelReason}\``);
+    }
+  }
+  const body = job.result ?? "";
+  lines.push("", "**Output:**", "", ...fenceCodeBlock(body));
+  if (job.error) {
+    lines.push("", "**Error:**", "", ...fenceCodeBlock(job.error));
+  }
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    lines.push("", "**Next steps:**", ...handoff);
+  } else {
+    lines.push(
+      "",
+      "**Next steps:**",
+      "- No agent id was recorded for this job \u2014 start a new run with `/cursor:task`."
+    );
+  }
+  return `${lines.join("\n")}
+`;
 }
 function renderError(error) {
   return `error: ${redactError(error)}
@@ -603,6 +654,7 @@ export {
   renderJobTable,
   renderReviewResult,
   jobAgentHandoffLines,
+  renderTaskResultCard,
   renderError,
   loadPromptTemplate,
   interpolateTemplate,

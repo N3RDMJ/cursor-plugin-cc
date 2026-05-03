@@ -15,11 +15,13 @@ import {
   renderError,
   renderJobTable,
   renderStreamEvent,
+  renderTaskResultCard,
   runReview,
   setGateEnabled
-} from "./chunk-X7RMCJV4.mjs";
+} from "./chunk-C2Y3PU5T.mjs";
 import {
   DEFAULT_MODEL,
+  RUN_NOT_ACTIVE_REASON,
   TERMINAL_STATUSES,
   buildAgentOptionsFromFlags,
   cancelJob,
@@ -61,15 +63,30 @@ import {
   validateModel,
   whoami,
   writeJsonAtomic
-} from "./chunk-B3GESHAJ.mjs";
+} from "./chunk-3FBBFC2X.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
 
-Cancel an active job. If the run is in-process, calls run.cancel() (when
-supported). Otherwise marks the persisted job as cancelled with reason
-"run-not-active" \u2014 the underlying SDK run may still complete.
+Cancel an active job. If the run was started in this CLI process, calls
+run.cancel() (capability-checked) and the job stops cleanly.
+
+LIMITATION: when the job was started in a different CLI process (e.g. via
+\`/cursor:task --background\` from a previous Claude Code turn), the in-memory
+Run object is not reachable and we cannot signal the SDK to stop. The job
+record is marked cancelled with reason="${RUN_NOT_ACTIVE_REASON}" but the
+underlying SDK run may keep going to completion. Track that run via
+\`/cursor:resume <agent-id>\` if you need to stop it.
 `;
+function runNotActiveHint(agentId) {
+  const resumeTarget = agentId ?? "<agent-id>";
+  return [
+    "warning: this CLI process did not own the in-memory Run object, so the",
+    "underlying SDK run was NOT signalled. The job record is marked cancelled",
+    "but the Cursor agent may keep working until it finishes on its own.",
+    `Use \`/cursor:resume ${resumeTarget}\` to reattach and observe / send a stop prompt.`
+  ].join("\n");
+}
 async function runCancel(args, io) {
   const parsed = parseArgs(args, {
     long: { json: "boolean", help: "boolean" },
@@ -85,14 +102,20 @@ async function runCancel(args, io) {
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   const stateDir = resolveStateDir(workspaceRoot);
   const result = await cancelJob(stateDir, jobId);
+  const splitBrain = result.cancelled && result.reason === RUN_NOT_ACTIVE_REASON;
   if (bool(parsed, "json")) {
-    io.stdout.write(`${JSON.stringify(result, null, 2)}
+    const payload = { ...result, splitBrain };
+    io.stdout.write(`${JSON.stringify(payload, null, 2)}
 `);
     return result.cancelled ? 0 : 1;
   }
   if (result.cancelled) {
     io.stdout.write(`cancelled: ${jobId}${result.reason ? ` (${result.reason})` : ""}
 `);
+    if (splitBrain) {
+      io.stderr.write(`${runNotActiveHint(result.job?.agentId)}
+`);
+    }
     return 0;
   }
   io.stderr.write(`could not cancel ${jobId}: ${result.reason ?? "unknown"}
@@ -101,16 +124,25 @@ async function runCancel(args, io) {
 }
 
 // plugins/cursor/scripts/commands/result.mts
-var HELP2 = `cursor-companion result [<job-id>] [--log] [--json] [--help]
+var HELP2 = `cursor-companion result [<job-id>] [--raw] [--log] [--json] [--help]
 
 Print a completed job's result text. Without a job id, defaults to the most
-recent terminal job for the current workspace. With --log, print the
-streaming log captured while the run was alive. With --json, emit the full
-JobRecord.
+recent terminal job for the current workspace.
+
+By default tasks render as a Markdown card (status, duration, agent id, fenced
+output, and resume hints) so the result is self-describing. Pass --raw to get
+the unwrapped output text on stdout \u2014 useful for piping into other tools.
+Reviews always render through the structured review formatter and ignore --raw.
+
+flags:
+  --raw   Emit just the result text on stdout (no card, no header)
+  --log   Print the streaming log captured while the run was alive
+  --json  Emit the full JobRecord
+  --help, -h
 `;
 async function runResult(args, io) {
   const parsed = parseArgs(args, {
-    long: { log: "boolean", json: "boolean", help: "boolean" },
+    long: { raw: "boolean", log: "boolean", json: "boolean", help: "boolean" },
     short: { h: "help" }
   });
   if (bool(parsed, "help")) {
@@ -158,15 +190,24 @@ async function runResult(args, io) {
 `);
     return 1;
   }
-  io.stdout.write(job.result);
-  if (!job.result.endsWith("\n")) io.stdout.write("\n");
-  const handoff = jobAgentHandoffLines(job.agentId);
-  if (handoff.length > 0) {
-    io.stderr.write(`
+  if (bool(parsed, "raw")) {
+    io.stdout.write(job.result);
+    if (!job.result.endsWith("\n")) io.stdout.write("\n");
+    const handoff = jobAgentHandoffLines(job.agentId);
+    if (handoff.length > 0) {
+      io.stderr.write(`
 Continue this Cursor agent:
 ${handoff.join("\n")}
 `);
+    }
+    return 0;
   }
+  if (job.type === "review" || job.type === "adversarial-review") {
+    io.stdout.write(job.result);
+    if (!job.result.endsWith("\n")) io.stdout.write("\n");
+    return 0;
+  }
+  io.stdout.write(renderTaskResultCard(job));
   return 0;
 }
 
@@ -249,18 +290,22 @@ function runAgentTaskBackground(opts) {
 // plugins/cursor/scripts/commands/resume.mts
 var HELP3 = `cursor-companion resume <agent-id> <prompt> [flags]
 cursor-companion resume --last <prompt> [flags]
-cursor-companion resume --list [--limit <n>] [--json]
+cursor-companion resume --list [--local|--remote] [--limit <n>] [--json]
 
 Reattach to an existing Cursor agent and continue the conversation. The agent
 keeps its prior context, so follow-up prompts are cheaper than starting fresh.
 
 flags:
   --last               Resume the most recent task agent (no agent-id needed)
-  --list               Print known agent ids from this workspace, then exit
-  --remote             With --list: query the SDK for durable agents instead
-                       of the local job index. Combine with --cloud to list
-                       cloud-runtime agents (requires CURSOR_API_KEY).
-  --limit <n>          With --list: cap the number of rows (default 10)
+  --list               Print known agent ids \u2014 merges this workspace's local
+                       index with the SDK's durable agent list (local runtime).
+                       Soft-fails on SDK errors with a footer note. Use
+                       --local or --remote to scope to one source.
+  --local              With --list: only show this workspace's job index
+  --remote             With --list: only show the SDK's durable agents
+                       (combine with --cloud to list cloud-runtime agents \u2014
+                       requires CURSOR_API_KEY)
+  --limit <n>          With --list: cap the number of rows per source (default 10)
   --write              Allow file modifications (default: read-only)
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
@@ -278,6 +323,7 @@ function parseFlags(args) {
     long: {
       last: "boolean",
       list: "boolean",
+      local: "boolean",
       remote: "boolean",
       limit: "string",
       write: "boolean",
@@ -295,10 +341,12 @@ function parseFlags(args) {
   const last = bool(parsed, "last");
   const list = bool(parsed, "list");
   const json = bool(parsed, "json");
+  const local = bool(parsed, "local");
   const remote = bool(parsed, "remote");
   const cloud = bool(parsed, "cloud");
   if (list) {
     if (last) throw new UsageError("--list and --last are mutually exclusive");
+    if (local && remote) throw new UsageError("--local and --remote are mutually exclusive");
     let limit = DEFAULT_LIST_LIMIT;
     const limitArg = optionalString(parsed, "limit");
     if (limitArg !== void 0) {
@@ -309,9 +357,11 @@ function parseFlags(args) {
     if (cloud && !remote) {
       throw new UsageError("--list --cloud requires --remote (cloud listing goes through the SDK)");
     }
-    return { kind: "list", limit, json, remote, cloud };
+    const source = local ? "local" : remote ? "remote" : "merged";
+    return { kind: "list", limit, json, source, cloud };
   }
   if (remote) throw new UsageError("--remote requires --list");
+  if (local) throw new UsageError("--local requires --list");
   if (optionalString(parsed, "limit") !== void 0) {
     throw new UsageError("--limit requires --list");
   }
@@ -396,6 +446,64 @@ ${separator}
 ${body}
 `;
 }
+async function runList(flags, workspaceRoot, io) {
+  if (flags.source === "remote") {
+    const rows = await listRemoteAgents(
+      flags.cloud ? { runtime: "cloud", limit: flags.limit } : { cwd: workspaceRoot, limit: flags.limit }
+    );
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify(rows, null, 2)}
+`);
+    } else {
+      io.stdout.write(renderRemoteListText(rows));
+    }
+    return 0;
+  }
+  const stateDir = resolveStateDir(workspaceRoot);
+  const localRows = findRecentTaskAgents(stateDir, flags.limit);
+  if (flags.source === "local") {
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify(localRows, null, 2)}
+`);
+    } else {
+      io.stdout.write(renderListText(localRows));
+    }
+    return 0;
+  }
+  let remoteRows = [];
+  let remoteError;
+  try {
+    remoteRows = await listRemoteAgents({ cwd: workspaceRoot, limit: flags.limit });
+  } catch (err) {
+    remoteError = err instanceof Error ? err.message : String(err);
+  }
+  const seenLocal = new Set(localRows.map((r) => r.agentId));
+  const remoteOnly = remoteRows.filter((r) => !seenLocal.has(r.agentId));
+  if (flags.json) {
+    io.stdout.write(
+      `${JSON.stringify({ local: localRows, remoteOnly, remoteError: remoteError ?? null }, null, 2)}
+`
+    );
+    return 0;
+  }
+  io.stdout.write(renderListText(localRows));
+  if (remoteOnly.length > 0) {
+    io.stdout.write(`
+Additional durable agents reported by the SDK (${remoteOnly.length}):
+`);
+    io.stdout.write(renderRemoteListText(remoteOnly));
+  } else if (!remoteError && localRows.length > 0) {
+    io.stdout.write("\n(no additional durable agents reported by the SDK)\n");
+  }
+  if (remoteError) {
+    io.stderr.write(
+      `
+note: SDK agent list failed (${remoteError}); showing local index only. Pass --local to suppress this lookup.
+`
+    );
+  }
+  return 0;
+}
 async function runResume(args, io) {
   let flags;
   try {
@@ -410,27 +518,7 @@ async function runResume(args, io) {
   const cwd = io.cwd();
   const workspaceRoot = resolveWorkspaceRoot(cwd);
   if (flags.kind === "list") {
-    if (flags.remote) {
-      const rows2 = await listRemoteAgents(
-        flags.cloud ? { runtime: "cloud", limit: flags.limit } : { cwd: workspaceRoot, limit: flags.limit }
-      );
-      if (flags.json) {
-        io.stdout.write(`${JSON.stringify(rows2, null, 2)}
-`);
-      } else {
-        io.stdout.write(renderRemoteListText(rows2));
-      }
-      return 0;
-    }
-    const stateDir2 = resolveStateDir(workspaceRoot);
-    const rows = findRecentTaskAgents(stateDir2, flags.limit);
-    if (flags.json) {
-      io.stdout.write(`${JSON.stringify(rows, null, 2)}
-`);
-    } else {
-      io.stdout.write(renderListText(rows));
-    }
-    return 0;
+    return runList(flags, workspaceRoot, io);
   }
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));
   let agentId;
