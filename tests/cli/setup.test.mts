@@ -20,6 +20,23 @@ vi.mock("@cursor/sdk", async () => {
   };
 });
 
+const installMocks = vi.hoisted(() => ({
+  installAndRecord: vi.fn(),
+  isSdkInstalled: vi.fn(),
+  readBootstrapStatus: vi.fn(),
+}));
+
+vi.mock("@plugin/lib/install.mjs", async () => {
+  const actual =
+    await vi.importActual<typeof import("@plugin/lib/install.mjs")>("@plugin/lib/install.mjs");
+  return {
+    ...actual,
+    installAndRecord: installMocks.installAndRecord,
+    isSdkInstalled: installMocks.isSdkInstalled,
+    readBootstrapStatus: installMocks.readBootstrapStatus,
+  };
+});
+
 import { main as companionMain } from "@plugin/cursor-companion.mjs";
 import { setBackendForTesting } from "@plugin/lib/credentials.mjs";
 import { readGateConfig } from "@plugin/lib/gate.mjs";
@@ -45,6 +62,8 @@ beforeEach(() => {
     { id: "composer-2", displayName: "Composer 2", variants: [] },
     { id: "gpt-5", displayName: "GPT 5", variants: [] },
   ]);
+  installMocks.isSdkInstalled.mockReturnValue(true);
+  installMocks.readBootstrapStatus.mockReturnValue(undefined);
 });
 
 afterEach(() => {
@@ -180,5 +199,95 @@ describe("CLI: setup", () => {
     expect(await companionMain(argv("setup", "--logout", "--json"), io)).toBe(1);
     const parsed = JSON.parse(io.captured.stdout.join(""));
     expect(parsed.ok).toBe(false);
+  });
+
+  it("default report includes an SDK row marked ok when the SDK is installed", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup"), io)).toBe(0);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("| SDK | ok |");
+  });
+
+  it("default report marks SDK fail and shows remediation when SDK is missing", async () => {
+    installMocks.isSdkInstalled.mockReturnValue(false);
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup"), io)).toBe(1);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("| SDK | fail |");
+    expect(out).toContain("/cursor:setup --install");
+  });
+
+  it("default report surfaces a bootstrap failure error from .bootstrap-status.json", async () => {
+    installMocks.isSdkInstalled.mockReturnValue(false);
+    installMocks.readBootstrapStatus.mockReturnValue({
+      ok: false,
+      attemptedAt: "2026-05-03T00:00:00Z",
+      error: "ENETUNREACH: network unreachable",
+      source: "bootstrap",
+      command: "npm install --omit=dev",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup"), io)).toBe(1);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("bootstrap failed: ENETUNREACH: network unreachable");
+  });
+
+  it("--json includes the sdk and bootstrap fields", async () => {
+    installMocks.isSdkInstalled.mockReturnValue(false);
+    installMocks.readBootstrapStatus.mockReturnValue({
+      ok: false,
+      attemptedAt: "2026-05-03T00:00:00Z",
+      error: "boom",
+      source: "bootstrap",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--json"), io)).toBe(1);
+    const report = JSON.parse(io.captured.stdout.join(""));
+    expect(report.sdk.ok).toBe(false);
+    expect(report.sdk.bootstrap.error).toBe("boom");
+    expect(report.sdk.remediation).toContain("--install");
+  });
+
+  it("--install runs the installer and reports success", async () => {
+    installMocks.installAndRecord.mockResolvedValue({
+      ok: true,
+      durationMs: 42,
+      command: "npm install --omit=dev",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--install"), io)).toBe(0);
+    expect(installMocks.installAndRecord).toHaveBeenCalledTimes(1);
+    expect(io.captured.stdout.join("")).toContain("Install succeeded");
+  });
+
+  it("--install reports failure with exit code 1", async () => {
+    installMocks.installAndRecord.mockResolvedValue({
+      ok: false,
+      durationMs: 7,
+      command: "npm install --omit=dev",
+      error: "exit code 1",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--install"), io)).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("Install failed");
+  });
+
+  it("--install --json emits structured output", async () => {
+    installMocks.installAndRecord.mockResolvedValue({
+      ok: true,
+      durationMs: 100,
+      command: "npm install --omit=dev",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--install", "--json"), io)).toBe(0);
+    const parsed = JSON.parse(io.captured.stdout.join(""));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.command).toBe("npm install --omit=dev");
+  });
+
+  it("rejects --install together with --login", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--install", "--login"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("mutually exclusive");
   });
 });

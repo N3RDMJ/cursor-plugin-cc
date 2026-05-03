@@ -44,6 +44,7 @@ import {
   markPhase,
   markRunning,
   readJobLog,
+  readJson,
   reconcileStaleJobs,
   registerActiveRun,
   resolveApiKey,
@@ -58,7 +59,8 @@ import {
   toAgentEvents,
   unregisterActiveRun,
   validateModel,
-  whoami
+  whoami,
+  writeJsonAtomic
 } from "./chunk-B3GESHAJ.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
@@ -479,15 +481,156 @@ async function runResume(args, io) {
   });
 }
 
+// plugins/cursor/scripts/lib/install.mts
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+var BOOTSTRAP_STATUS_FILENAME = ".bootstrap-status.json";
+var BOOTSTRAP_SENTINEL_FILENAME = ".bootstrap-ok";
+function resolvePluginRoot() {
+  const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (envRoot && envRoot.trim() !== "") return path.resolve(envRoot);
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "..", "..");
+}
+function pluginNodeModules(pluginRoot) {
+  return path.join(pluginRoot, "node_modules");
+}
+function statusPath(pluginRoot) {
+  return path.join(pluginNodeModules(pluginRoot), BOOTSTRAP_STATUS_FILENAME);
+}
+function sentinelPath(pluginRoot) {
+  return path.join(pluginNodeModules(pluginRoot), BOOTSTRAP_SENTINEL_FILENAME);
+}
+function isSdkInstalled(pluginRoot) {
+  const direct = path.join(pluginNodeModules(pluginRoot), "@cursor", "sdk", "package.json");
+  if (fs.existsSync(direct)) return true;
+  try {
+    const require2 = createRequire(import.meta.url);
+    require2.resolve("@cursor/sdk");
+    return true;
+  } catch {
+    return false;
+  }
+}
+function readBootstrapStatus(pluginRoot) {
+  return readJson(statusPath(pluginRoot));
+}
+function writeBootstrapStatus(pluginRoot, status) {
+  writeJsonAtomic(statusPath(pluginRoot), status);
+}
+function writeBootstrapSentinel(pluginRoot) {
+  fs.mkdirSync(pluginNodeModules(pluginRoot), { recursive: true });
+  fs.writeFileSync(sentinelPath(pluginRoot), (/* @__PURE__ */ new Date()).toISOString(), "utf8");
+}
+function runNpmInstall(pluginRoot, options = {}) {
+  const command = "npm install --omit=dev";
+  const timeoutMs = options.timeoutMs ?? 12e4;
+  const start = Date.now();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    let child;
+    try {
+      child = spawn("npm", ["install", "--omit=dev"], {
+        cwd: pluginRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: process.env
+      });
+    } catch (err) {
+      finish({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - start,
+        command
+      });
+      return;
+    }
+    let stderrTail = "";
+    const collect = (chunk) => {
+      const text = chunk.toString("utf8");
+      stderrTail = (stderrTail + text).slice(-2048);
+      options.onOutput?.(text);
+    };
+    child.stdout?.on("data", (chunk) => options.onOutput?.(chunk.toString("utf8")));
+    child.stderr?.on("data", collect);
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+      }
+      finish({
+        ok: false,
+        error: `npm install timed out after ${timeoutMs}ms`,
+        durationMs: Date.now() - start,
+        command
+      });
+    }, timeoutMs);
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      finish({
+        ok: false,
+        error: err.message,
+        durationMs: Date.now() - start,
+        command
+      });
+    });
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        finish({ ok: true, durationMs: Date.now() - start, command });
+      } else {
+        const reason = signal ? `npm install terminated by signal ${signal}` : `npm install exited with code ${code}`;
+        const detail = stderrTail.trim();
+        finish({
+          ok: false,
+          error: detail ? `${reason}: ${detail}` : reason,
+          durationMs: Date.now() - start,
+          command
+        });
+      }
+    });
+  });
+}
+async function installAndRecord(pluginRoot, options = {}) {
+  const result = await runNpmInstall(pluginRoot, options);
+  const status = {
+    ok: result.ok,
+    attemptedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    durationMs: result.durationMs,
+    command: result.command,
+    ...options.source ? { source: options.source } : {},
+    ...result.error ? { error: result.error } : {}
+  };
+  try {
+    writeBootstrapStatus(pluginRoot, status);
+    if (result.ok) writeBootstrapSentinel(pluginRoot);
+  } catch {
+  }
+  return result;
+}
+
 // plugins/cursor/scripts/commands/setup.mts
 var NODE_MIN_MAJOR = 18;
 var HELP4 = `cursor-companion setup [flags]
 
 Validates the plugin runtime:
   - Node.js >= ${NODE_MIN_MAJOR}
+  - @cursor/sdk is installed (bootstrap.mjs ran successfully)
   - API key is available (env or keychain)
   - Cursor.me() succeeds (key is valid)
   - Cursor.models.list() returns at least one model
+
+SDK installation:
+  --install            Run \`npm install --omit=dev\` in the plugin root.
+                       Use this when bootstrap reports a failure or the
+                       SDK row in the report is "fail".
 
 Credential management:
   --login              Store a Cursor API key in the OS keychain.
@@ -547,6 +690,17 @@ function modelChoices(models) {
   }
   return choices;
 }
+var INSTALL_REMEDIATION = "Run /cursor:setup --install to (re)install the SDK.";
+function buildSdkReport() {
+  const pluginRoot = resolvePluginRoot();
+  const installed = isSdkInstalled(pluginRoot);
+  const bootstrap = readBootstrapStatus(pluginRoot);
+  const ok = installed && bootstrap?.ok !== false;
+  const sdk = { ok, pluginRoot };
+  if (bootstrap) sdk.bootstrap = bootstrap;
+  if (!ok) sdk.remediation = INSTALL_REMEDIATION;
+  return sdk;
+}
 function errorMessage(reason) {
   return reason instanceof Error ? reason.message : String(reason);
 }
@@ -554,6 +708,7 @@ async function buildReport(input) {
   const resolved = resolveDefaultModel(DEFAULT_MODEL);
   const report = {
     node: { ok: nodeMajor() >= NODE_MIN_MAJOR, version: process.versions.node },
+    sdk: buildSdkReport(),
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
@@ -597,6 +752,7 @@ function renderReport(report) {
     );
   };
   row("Node.js", yes(report.node.ok), report.node.version);
+  row("SDK", yes(report.sdk.ok), describeSdk(report.sdk));
   const keyDetail = report.apiKey.ok ? `source: ${report.apiKey.source}` : report.apiKey.error ?? "";
   row("API key", yes(report.apiKey.ok), keyDetail);
   if (report.account.ok) {
@@ -618,8 +774,24 @@ function renderReport(report) {
       lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
     }
   }
+  if (!report.sdk.ok) {
+    lines.push("");
+    lines.push(`> ${report.sdk.remediation ?? INSTALL_REMEDIATION}`);
+  }
   return `${lines.join("\n")}
 `;
+}
+function describeSdk(sdk) {
+  if (sdk.ok) {
+    if (sdk.bootstrap?.ok && sdk.bootstrap.attemptedAt) {
+      return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
+    }
+    return "installed";
+  }
+  if (sdk.bootstrap?.error) {
+    return `bootstrap failed: ${sdk.bootstrap.error}`;
+  }
+  return "not installed";
 }
 function describeSource(source) {
   switch (source) {
@@ -724,6 +896,40 @@ async function runLogin(io, json) {
   }
   return 0;
 }
+async function runInstall(io, json) {
+  const pluginRoot = resolvePluginRoot();
+  if (!json) {
+    io.stdout.write(`Installing @cursor/sdk in ${pluginRoot}
+`);
+  }
+  const result = await installAndRecord(pluginRoot, {
+    source: "setup",
+    onOutput: json ? void 0 : (chunk) => io.stderr.write(chunk)
+  });
+  if (json) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: result.ok,
+          pluginRoot,
+          durationMs: result.durationMs,
+          command: result.command,
+          ...result.error ? { error: result.error } : {}
+        },
+        null,
+        2
+      )}
+`
+    );
+  } else if (result.ok) {
+    io.stdout.write(`Install succeeded in ${result.durationMs}ms.
+`);
+  } else {
+    io.stderr.write(`Install failed: ${result.error ?? "unknown error"}
+`);
+  }
+  return result.ok ? 0 : 1;
+}
 async function runLogout(io, json) {
   const backend = detectBackend();
   if (!backend) {
@@ -752,6 +958,7 @@ async function runSetup(args, io) {
     long: {
       json: "boolean",
       help: "boolean",
+      install: "boolean",
       login: "boolean",
       logout: "boolean",
       "enable-gate": "boolean",
@@ -766,9 +973,11 @@ async function runSetup(args, io) {
     return 0;
   }
   const jsonFlag = bool(parsed, "json");
-  if (bool(parsed, "login") && bool(parsed, "logout")) {
-    throw new UsageError("--login and --logout are mutually exclusive");
+  const exclusive = ["install", "login", "logout"].filter((flag) => bool(parsed, flag));
+  if (exclusive.length > 1) {
+    throw new UsageError(`${exclusive.map((f) => `--${f}`).join(" and ")} are mutually exclusive`);
   }
+  if (bool(parsed, "install")) return runInstall(io, jsonFlag);
   if (bool(parsed, "login")) return runLogin(io, jsonFlag);
   if (bool(parsed, "logout")) return runLogout(io, jsonFlag);
   const enableGate = bool(parsed, "enable-gate");
@@ -807,7 +1016,7 @@ async function runSetup(args, io) {
   } else {
     io.stdout.write(renderReport(report));
   }
-  const allOk = report.node.ok && report.apiKey.ok && report.account.ok && report.models.ok;
+  const allOk = report.node.ok && report.sdk.ok && report.apiKey.ok && report.account.ok && report.models.ok;
   return allOk ? 0 : 1;
 }
 
@@ -1016,13 +1225,13 @@ flags:
 `;
 var HelpRequested2 = class extends Error {
 };
-function readPromptFile(cwd, path) {
-  const abs = resolvePath(cwd, path);
+function readPromptFile(cwd, path2) {
+  const abs = resolvePath(cwd, path2);
   try {
     return readFileSync(abs, "utf8").trim();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new UsageError(`failed to read --prompt-file ${path}: ${detail}`);
+    throw new UsageError(`failed to read --prompt-file ${path2}: ${detail}`);
   }
 }
 function parseFlags2(args, cwd) {

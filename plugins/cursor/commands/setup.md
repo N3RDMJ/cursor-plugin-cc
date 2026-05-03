@@ -1,11 +1,27 @@
 ---
-description: Validate the cursor-plugin-cc runtime — Node, API key, account, models. Manage credentials and the Stop review gate.
-argument-hint: '[--login|--logout] [--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
+description: Validate the cursor-plugin-cc runtime — Node, SDK, API key, account, models. Manage credentials and the Stop review gate.
+argument-hint: '[--install] [--login|--logout] [--enable-gate|--disable-gate] [--set-model <id>|--clear-model] [--json]'
 allowed-tools: Bash(node:*), Bash(printf:*), Bash(rm:*)
 disable-model-invocation: true
 ---
 
 # /cursor:setup
+
+## When `--install` is passed
+
+Run the CLI directly:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --install
+```
+
+This reruns `npm install --omit=dev` in the plugin root and persists a status
+file alongside the plugin's `node_modules/`. Use it when the SDK row in the
+default report is `fail` (typical cause: the `SessionStart` bootstrap hook
+hit a network or permissions error and silently swallowed it).
+
+Surface the output verbatim. On success the next `/cursor:setup` should show
+`SDK | ok |`.
 
 ## When `--login` is passed
 
@@ -61,8 +77,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup $ARGUMENT
 
 Pass `--json` for machine-readable output. If anything fails (API key missing,
 network error, model catalog empty), the exit code is non-zero and the failure
-rows print on stdout. No further action needed — surface the output verbatim
-to the user.
+rows print on stdout. Surface the output verbatim to the user.
+
+If the **SDK** row is `fail`, recommend `/cursor:setup --install` as the
+remediation. The default report includes a remediation hint at the bottom in
+that case.
 
 ## Credential management
 
