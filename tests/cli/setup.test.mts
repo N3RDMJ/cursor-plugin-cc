@@ -191,6 +191,13 @@ describe("CLI: setup", () => {
     expect(readUserConfig().defaultModel).toBeUndefined();
   });
 
+  it("--set-model rejects an explicit empty value instead of silently no-op'ing", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--set-model", ""), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("model selector is empty");
+    expect(readUserConfig().defaultModel).toBeUndefined();
+  });
+
   it("--clear-model removes the persisted default", async () => {
     const setIo = captureIO(workDir);
     await companionMain(argv("setup", "--set-model", "gpt-5"), setIo);

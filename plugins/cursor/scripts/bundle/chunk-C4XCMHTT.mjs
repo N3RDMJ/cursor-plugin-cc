@@ -545,8 +545,9 @@ function formatModelSelection(model) {
   return `${model.id}:${pairs}`;
 }
 function optionalModelArg(parsed, name) {
-  const raw = optionalString(parsed, name);
-  return raw ? parseModelArg(raw) : void 0;
+  const raw = parsed.flags[name];
+  if (typeof raw !== "string") return void 0;
+  return parseModelArg(raw);
 }
 
 // plugins/cursor/scripts/lib/user-config.mts

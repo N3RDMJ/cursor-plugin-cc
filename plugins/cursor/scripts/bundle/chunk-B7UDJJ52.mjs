@@ -19,7 +19,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-MTISK4JK.mjs";
+} from "./chunk-C4XCMHTT.mjs";
 
 // plugins/cursor/scripts/lib/render.mts
 function formatDuration(ms) {

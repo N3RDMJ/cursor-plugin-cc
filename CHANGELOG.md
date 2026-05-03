@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## v1.1.0 - 2026-05-03
+
+### Added
+
+- Added support for model variant params (effort level) in `--model`, `--set-model`, and `CURSOR_MODEL`. Use `id[:k=v,k=v]` syntax — for example `--model gpt-5:reasoning_effort=low` or `/cursor:setup --set-model gpt-5:reasoning_effort=high,verbosity=low`. The setup report's "Default" row and "Available models" list now display canonical selectors that round-trip back into `--set-model`.
+- Added `validateModel` param-key/value validation against the catalog's `parameters` schema, so `--set-model gpt-5:reasoning_effort=extreme` fails fast with the allowed values listed.
+
+### Changed
+
+- A malformed `CURSOR_MODEL` env var now emits a one-line stderr warning and falls through to the persisted default, instead of being silently ignored.
+- An explicit empty value (`--model ""` / `--set-model ""`) now throws a clear `UsageError` instead of being silently ignored.
+
 ## v1.0.2 - 2026-05-03
 
 ### Changed

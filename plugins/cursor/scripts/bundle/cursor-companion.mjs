@@ -14,7 +14,7 @@ import {
   renderTaskResultCard,
   runReview,
   setGateEnabled
-} from "./chunk-FI3FRORZ.mjs";
+} from "./chunk-B7UDJJ52.mjs";
 import {
   DEFAULT_MODEL,
   RUN_NOT_ACTIVE_REASON,
@@ -65,7 +65,7 @@ import {
   validateModel,
   whoami,
   writeJsonAtomic
-} from "./chunk-MTISK4JK.mjs";
+} from "./chunk-C4XCMHTT.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]

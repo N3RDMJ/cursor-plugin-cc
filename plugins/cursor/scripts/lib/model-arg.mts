@@ -1,6 +1,6 @@
 import type { ModelSelection } from "@cursor/sdk";
 
-import { optionalString, type ParsedArgs, UsageError } from "./args.mjs";
+import { type ParsedArgs, UsageError } from "./args.mjs";
 
 /** Parse an `id[:k=v,k=v]` selector (e.g. `gpt-5:reasoning_effort=low`). */
 export function parseModelArg(input: string): ModelSelection {
@@ -54,8 +54,13 @@ export function formatModelSelection(model: ModelSelection): string {
   return `${model.id}:${pairs}`;
 }
 
-/** Pull a `--model`-style flag off `ParsedArgs` and parse it. */
+/**
+ * Pull a `--model`-style flag off `ParsedArgs` and parse it. Distinguishes
+ * "flag absent" (returns undefined) from "flag passed with empty value"
+ * (`parseModelArg` throws a UsageError) so a typo'd `--model ""` surfaces.
+ */
 export function optionalModelArg(parsed: ParsedArgs, name: string): ModelSelection | undefined {
-  const raw = optionalString(parsed, name);
-  return raw ? parseModelArg(raw) : undefined;
+  const raw = parsed.flags[name];
+  if (typeof raw !== "string") return undefined;
+  return parseModelArg(raw);
 }

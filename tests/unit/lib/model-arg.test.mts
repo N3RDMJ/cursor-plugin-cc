@@ -1,5 +1,5 @@
 import { UsageError } from "@plugin/lib/args.mjs";
-import { formatModelSelection, parseModelArg } from "@plugin/lib/model-arg.mjs";
+import { formatModelSelection, optionalModelArg, parseModelArg } from "@plugin/lib/model-arg.mjs";
 import { describe, expect, it } from "vitest";
 
 describe("parseModelArg", () => {
@@ -107,5 +107,26 @@ describe("formatModelSelection", () => {
     for (const input of inputs) {
       expect(formatModelSelection(parseModelArg(input))).toBe(input);
     }
+  });
+});
+
+describe("optionalModelArg", () => {
+  it("returns undefined when the flag is absent", () => {
+    expect(optionalModelArg({ positionals: [], flags: {} }, "model")).toBeUndefined();
+  });
+
+  it("parses a present value", () => {
+    expect(
+      optionalModelArg(
+        { positionals: [], flags: { model: "gpt-5:reasoning_effort=low" } },
+        "model",
+      ),
+    ).toEqual({ id: "gpt-5", params: [{ id: "reasoning_effort", value: "low" }] });
+  });
+
+  it("throws on an explicit empty value (not silent no-op)", () => {
+    expect(() => optionalModelArg({ positionals: [], flags: { model: "" } }, "model")).toThrow(
+      UsageError,
+    );
   });
 });
