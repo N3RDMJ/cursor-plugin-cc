@@ -156,6 +156,12 @@ describe("CLI: task", () => {
     expect(fileIdx).toBeGreaterThan(posIdx);
   });
 
+  it("--prompt-file outside workspace exits 2 with traversal error", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("task", "--prompt-file", "../../etc/passwd"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("must reference a path within the workspace");
+  });
+
   it("--prompt-file with a missing path exits 2 with usage error", async () => {
     const io = captureIO(workDir);
     expect(

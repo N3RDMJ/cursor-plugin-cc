@@ -1305,13 +1305,17 @@ flags:
 `;
 var HelpRequested2 = class extends Error {
 };
-function readPromptFile(cwd, path2) {
-  const abs = resolvePath(cwd, path2);
+function readPromptFile(cwd, filePath) {
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const abs = resolvePath(cwd, filePath);
+  if (!abs.startsWith(`${workspaceRoot}/`) && abs !== workspaceRoot) {
+    throw new UsageError(`--prompt-file must reference a path within the workspace`);
+  }
   try {
     return readFileSync(abs, "utf8").trim();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new UsageError(`failed to read --prompt-file ${path2}: ${detail}`);
+    throw new UsageError(`failed to read --prompt-file ${filePath}: ${detail}`);
   }
 }
 function parseFlags2(args, cwd) {

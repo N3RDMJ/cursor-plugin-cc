@@ -53,13 +53,17 @@ interface TaskFlags {
 
 class HelpRequested extends Error {}
 
-function readPromptFile(cwd: string, path: string): string {
-  const abs = resolvePath(cwd, path);
+function readPromptFile(cwd: string, filePath: string): string {
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
+  const abs = resolvePath(cwd, filePath);
+  if (!abs.startsWith(`${workspaceRoot}/`) && abs !== workspaceRoot) {
+    throw new UsageError(`--prompt-file must reference a path within the workspace`);
+  }
   try {
     return readFileSync(abs, "utf8").trim();
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    throw new UsageError(`failed to read --prompt-file ${path}: ${detail}`);
+    throw new UsageError(`failed to read --prompt-file ${filePath}: ${detail}`);
   }
 }
 
