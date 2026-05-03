@@ -1,5 +1,7 @@
 import {
   TERMINAL_STATUSES,
+  UsageError,
+  bool,
   createJob,
   ensureStateDir,
   getDiff,
@@ -8,96 +10,16 @@ import {
   markFinished,
   markRunning,
   oneShot,
+  optionalString,
+  parseArgs,
+  parseModelArg,
   readJson,
   redactError,
   resolveReviewTarget,
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-3FBBFC2X.mjs";
-
-// plugins/cursor/scripts/lib/args.mts
-var UsageError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "UsageError";
-  }
-};
-function parseArgs(argv, spec = {}) {
-  const long = spec.long ?? {};
-  const short = spec.short ?? {};
-  const flags = {};
-  const positionals = [];
-  let stopParsing = false;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === void 0) continue;
-    if (stopParsing) {
-      positionals.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      stopParsing = true;
-      continue;
-    }
-    if (arg.startsWith("--")) {
-      const eqIdx = arg.indexOf("=");
-      const name = eqIdx === -1 ? arg.slice(2) : arg.slice(2, eqIdx);
-      const inlineValue = eqIdx === -1 ? void 0 : arg.slice(eqIdx + 1);
-      const kind = long[name];
-      if (kind === "boolean") {
-        if (inlineValue === "false") {
-          delete flags[name];
-        } else {
-          flags[name] = true;
-        }
-      } else if (kind === "string") {
-        if (inlineValue !== void 0) {
-          flags[name] = inlineValue;
-        } else {
-          const next = argv[i + 1];
-          if (next === void 0 || next.startsWith("-")) {
-            throw new UsageError(`expected value after --${name}`);
-          }
-          flags[name] = next;
-          i += 1;
-        }
-      } else {
-        if (inlineValue !== void 0) flags[name] = inlineValue;
-        else flags[name] = true;
-      }
-      continue;
-    }
-    if (arg.startsWith("-") && arg.length > 1) {
-      const shortName = arg.slice(1);
-      const longName = short[shortName];
-      if (!longName) {
-        throw new UsageError(`unknown short flag: ${arg}`);
-      }
-      const kind = long[longName];
-      if (kind === "string") {
-        const next = argv[i + 1];
-        if (next === void 0 || next.startsWith("-")) {
-          throw new UsageError(`expected value after ${arg}`);
-        }
-        flags[longName] = next;
-        i += 1;
-      } else {
-        flags[longName] = true;
-      }
-      continue;
-    }
-    positionals.push(arg);
-  }
-  return { positionals, flags };
-}
-function optionalString(parsed, name) {
-  const v = parsed.flags[name];
-  return typeof v === "string" ? v : void 0;
-}
-function bool(parsed, name) {
-  return parsed.flags[name] === true;
-}
+} from "./chunk-SFBCFJHY.mjs";
 
 // plugins/cursor/scripts/lib/render.mts
 function formatDuration(ms) {
@@ -420,7 +342,10 @@ flags:
                        the tree is dirty, otherwise branch-vs-default-branch.
                        Mutually exclusive with --staged.
   --base <ref>         Diff against this ref. Implies branch scope.
-  --model <id>         Override the default model
+  --model <id[:k=v,...]>
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
   --timeout <ms>       Cancel the review if it exceeds this duration
   --json               Print the raw structured review JSON
   --help, -h
@@ -475,8 +400,8 @@ function parseFlags(args) {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  const modelArg = optionalString(parsed, "model");
+  if (modelArg) flags.model = parseModelArg(modelArg);
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
@@ -641,10 +566,6 @@ function setGateEnabled(stateDir, enabled) {
 }
 
 export {
-  UsageError,
-  parseArgs,
-  optionalString,
-  bool,
   compactText,
   renderStreamEvent,
   formatJobActions,

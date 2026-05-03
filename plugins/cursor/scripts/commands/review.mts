@@ -5,6 +5,7 @@ import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
 import { oneShot } from "../lib/cursor-agent.mjs";
 import { getDiff, getStatus, type ReviewScope, resolveReviewTarget } from "../lib/git.mjs";
 import { createJob, markFailed, markFinished, markRunning } from "../lib/job-control.mjs";
+import { parseModelArg } from "../lib/model-arg.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { type ReviewOutput, renderReviewResult } from "../lib/render.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -25,7 +26,10 @@ flags:
                        the tree is dirty, otherwise branch-vs-default-branch.
                        Mutually exclusive with --staged.
   --base <ref>         Diff against this ref. Implies branch scope.
-  --model <id>         Override the default model
+  --model <id[:k=v,...]>
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
   --timeout <ms>       Cancel the review if it exceeds this duration
   --json               Print the raw structured review JSON
   --help, -h
@@ -93,8 +97,8 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  const modelArg = optionalString(parsed, "model");
+  if (modelArg) flags.model = parseModelArg(modelArg);
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

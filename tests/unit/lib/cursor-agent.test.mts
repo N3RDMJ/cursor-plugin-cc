@@ -292,6 +292,53 @@ describe("createAgent / resumeAgent", () => {
     expect(call?.local).toEqual({ cwd: "/tmp/repo", settingSources: ["project", "user"] });
   });
 
+  it("createAgent forwards variant params on the model selection", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+
+    await createAgent({
+      cwd: "/tmp/repo",
+      model: { id: "gpt-5", params: [{ id: "reasoning_effort", value: "low" }] },
+    });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+  });
+
+  it("createAgent uses CURSOR_MODEL params when no model is passed", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+    process.env[USER_CONFIG_ENV_MODEL] = "gpt-5:reasoning_effort=high";
+
+    await createAgent({ cwd: "/tmp/repo" });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "high" }],
+    });
+  });
+
+  it("createAgent uses persisted user-config params when env is unset", async () => {
+    const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
+    sdkMocks.agentCreate.mockResolvedValue(fake);
+    setDefaultModel({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+
+    await createAgent({ cwd: "/tmp/repo" });
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+  });
+
   it("createAgent forwards mcpServers", async () => {
     const fake = fakeAgent(makeRun([], { id: "r1", status: "finished" }));
     sdkMocks.agentCreate.mockResolvedValue(fake);
@@ -609,6 +656,71 @@ describe("Cursor account helpers", () => {
   it("validateModel throws ConfigurationError for an unknown model", async () => {
     sdkMocks.modelsList.mockResolvedValue([{ id: "composer-2", displayName: "Composer 2" }]);
     await expect(validateModel({ id: "imaginary" })).rejects.toThrow(/imaginary/);
+  });
+
+  it("validateModel accepts known param keys with allowed values", async () => {
+    const list: SDKModel[] = [
+      {
+        id: "gpt-5",
+        displayName: "GPT 5",
+        parameters: [
+          {
+            id: "reasoning_effort",
+            displayName: "Reasoning effort",
+            values: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+          },
+        ],
+      },
+    ];
+    sdkMocks.modelsList.mockResolvedValue(list);
+    const found = await validateModel({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+    expect(found.id).toBe("gpt-5");
+  });
+
+  it("validateModel rejects an unknown param key", async () => {
+    sdkMocks.modelsList.mockResolvedValue([
+      {
+        id: "gpt-5",
+        displayName: "GPT 5",
+        parameters: [
+          {
+            id: "reasoning_effort",
+            values: [{ value: "low" }, { value: "high" }],
+          },
+        ],
+      },
+    ]);
+    await expect(
+      validateModel({ id: "gpt-5", params: [{ id: "verbosity", value: "low" }] }),
+    ).rejects.toThrow(/verbosity/);
+  });
+
+  it("validateModel rejects a param value not in the catalog", async () => {
+    sdkMocks.modelsList.mockResolvedValue([
+      {
+        id: "gpt-5",
+        displayName: "GPT 5",
+        parameters: [
+          {
+            id: "reasoning_effort",
+            values: [{ value: "low" }, { value: "high" }],
+          },
+        ],
+      },
+    ]);
+    await expect(
+      validateModel({ id: "gpt-5", params: [{ id: "reasoning_effort", value: "extreme" }] }),
+    ).rejects.toThrow(/extreme/);
+  });
+
+  it("validateModel accepts any params when the catalog omits a parameters schema", async () => {
+    sdkMocks.modelsList.mockResolvedValue([{ id: "gpt-5", displayName: "GPT 5" }]);
+    await expect(
+      validateModel({ id: "gpt-5", params: [{ id: "reasoning_effort", value: "low" }] }),
+    ).resolves.toMatchObject({ id: "gpt-5" });
   });
 });
 

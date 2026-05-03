@@ -1,6 +1,6 @@
 ---
 description: Reattach to an existing Cursor agent and continue the conversation.
-argument-hint: '<agent-id|--last|--list> [prompt] [--write] [--background] [--model <id>]'
+argument-hint: '<agent-id|--last|--list> [prompt] [--write] [--background] [--model <id[:k=v,...]>]'
 allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
@@ -31,10 +31,14 @@ Usage:
   `--local --json` for the flat array of local rows.
 
 Inherits the same flags as `/cursor:task`: `--write`, `--background`, `--force`,
-`--cloud`, `--model <id>`, `--timeout <ms>`, `--json`.
+`--cloud`, `--model <id[:k=v,...]>`, `--timeout <ms>`, `--json`.
 
 Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default
-(set via `/cursor:setup --set-model <id>`) > built-in fallback.
+(set via `/cursor:setup --set-model <id[:k=v,...]>`) > built-in fallback.
+
+Append `:key=value[,key=value]` to a model id to set variant params such as
+reasoning effort (e.g. `--model gpt-5:reasoning_effort=low`). See
+`/cursor:setup` for the catalog of available models and variants.
 
 Default policy is read-only — pass `--write` to allow file modifications.
 

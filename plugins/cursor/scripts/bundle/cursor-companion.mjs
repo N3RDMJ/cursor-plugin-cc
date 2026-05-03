@@ -1,7 +1,5 @@
 import {
-  UsageError,
   ageFromIso,
-  bool,
   compactText,
   escapeMarkdownCell,
   fenceCodeBlock,
@@ -9,8 +7,6 @@ import {
   interpolateTemplate,
   jobAgentHandoffLines,
   loadPromptTemplate,
-  optionalString,
-  parseArgs,
   readGateConfig,
   renderError,
   renderJobTable,
@@ -18,11 +14,13 @@ import {
   renderTaskResultCard,
   runReview,
   setGateEnabled
-} from "./chunk-C2Y3PU5T.mjs";
+} from "./chunk-TQA64WTQ.mjs";
 import {
   DEFAULT_MODEL,
   RUN_NOT_ACTIVE_REASON,
   TERMINAL_STATUSES,
+  UsageError,
+  bool,
   buildAgentOptionsFromFlags,
   cancelJob,
   clearDefaultModel,
@@ -33,6 +31,7 @@ import {
   disposeAgent,
   ensureStateDir,
   findRecentTaskAgents,
+  formatModelSelection,
   getBranch,
   getJob,
   getRecentCommits,
@@ -45,6 +44,9 @@ import {
   markFinished,
   markPhase,
   markRunning,
+  optionalString,
+  parseArgs,
+  parseModelArg,
   readJobLog,
   readJson,
   reconcileStaleJobs,
@@ -63,7 +65,7 @@ import {
   validateModel,
   whoami,
   writeJsonAtomic
-} from "./chunk-3FBBFC2X.mjs";
+} from "./chunk-SFBCFJHY.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -310,7 +312,10 @@ flags:
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
   --cloud              Use Cursor cloud against the detected GitHub origin
-  --model <id>, -m
+  --model <id[:k=v,...]>, -m
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
   --timeout <ms>       Cancel the run if it exceeds this duration
   --json               Print the final result as JSON (single line)
   --help, -h
@@ -390,8 +395,8 @@ function parseFlags(args) {
     cloud,
     json
   };
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  const modelArg = optionalString(parsed, "model");
+  if (modelArg) flags.model = parseModelArg(modelArg);
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
@@ -730,8 +735,15 @@ Stop review gate (per workspace, opt-in):
   --disable-gate       Turn off the Stop review gate for this workspace
 
 Default model (user-wide, used when --model is not passed):
-  --set-model <id>     Persist <id> as the default for new agent runs.
-                       Validated against Cursor.models.list().
+  --set-model <id[:k=v,...]>
+                       Persist a model selection as the default for new
+                       agent runs. Append \`:key=value,key=value\` to set
+                       variant params (e.g. effort level):
+                         --set-model gpt-5
+                         --set-model gpt-5:reasoning_effort=low
+                         --set-model gpt-5:reasoning_effort=high,verbosity=low
+                       Validated against Cursor.models.list() \u2014 the id and
+                       any param keys/values must be in the catalog.
   --clear-model        Remove the persisted default (revert to ${DEFAULT_MODEL.id}).
                        Resolution order: --model flag > CURSOR_MODEL env >
                        persisted default > ${DEFAULT_MODEL.id} fallback.
@@ -797,7 +809,11 @@ async function buildReport(input) {
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
-    defaultModel: { id: resolved.model.id, source: resolved.source },
+    defaultModel: {
+      id: resolved.model.id,
+      selector: formatModelSelection(resolved.model),
+      source: resolved.source
+    },
     gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot }
   };
   try {
@@ -850,13 +866,13 @@ function renderReport(report) {
   } else if (report.models.error) {
     row("Models", "fail", report.models.error);
   }
-  row("Default", report.defaultModel.id, describeSource(report.defaultModel.source));
+  row("Default", report.defaultModel.selector, describeSource(report.defaultModel.source));
   row("Stop gate", report.gate.enabled ? "on" : "off", `workspace: ${report.gate.workspaceRoot}`);
   if (report.models.ok && report.models.choices.length > 0) {
     lines.push("");
     lines.push("**Available models:**");
     for (const choice of report.models.choices) {
-      lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
+      lines.push(`- ${choice.label} \`[${formatModelSelection(choice.selection)}]\``);
     }
   }
   if (!report.sdk.ok) {
@@ -1108,19 +1124,20 @@ async function runSetup(args, io) {
   if (enableGate && disableGate) {
     throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
   }
-  const setModelId = optionalString(parsed, "set-model");
+  const setModelArg = optionalString(parsed, "set-model");
   const clearModel = bool(parsed, "clear-model");
-  if (setModelId && clearModel) {
+  if (setModelArg && clearModel) {
     throw new UsageError("--set-model and --clear-model are mutually exclusive");
   }
-  if (setModelId !== void 0 && setModelId.trim() === "") {
+  if (setModelArg !== void 0 && setModelArg.trim() === "") {
     throw new UsageError("--set-model requires a non-empty model id");
   }
   let prefetchedCatalog;
-  if (setModelId) {
+  if (setModelArg) {
+    const selection = parseModelArg(setModelArg);
     prefetchedCatalog = await listModels();
-    await validateModel({ id: setModelId }, { catalog: prefetchedCatalog });
-    setDefaultModel({ id: setModelId });
+    await validateModel(selection, { catalog: prefetchedCatalog });
+    setDefaultModel(selection);
   } else if (clearModel) {
     clearDefaultModel();
   }
@@ -1340,8 +1357,11 @@ flags:
   --prompt-file <path> Read the prompt from a file. Concatenated with any
                        positional prompt text (positional first, file body
                        second, separated by a blank line).
-  --model <id>         Override the default model
-  -m <id>
+  --model <id[:k=v,...]>
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
+  -m <id[:k=v,...]>
   --timeout <ms>       Cancel the run if it exceeds this duration
   --json               Print the final result as JSON (single line)
   --help, -h
@@ -1392,8 +1412,8 @@ function parseFlags2(args, cwd) {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json")
   };
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  const modelArg = optionalString(parsed, "model");
+  if (modelArg) flags.model = parseModelArg(modelArg);
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

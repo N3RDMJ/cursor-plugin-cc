@@ -69,6 +69,48 @@ describe("user-config persistence", () => {
     writeUserConfig({ version: 1, defaultModel: { id: "" } as { id: string } });
     expect(readUserConfig().defaultModel).toBeUndefined();
   });
+
+  it("persists params on the default model and reads them back", () => {
+    setDefaultModel({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+    expect(readUserConfig().defaultModel).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+  });
+
+  it("strips malformed param entries from disk", () => {
+    writeUserConfig({
+      version: 1,
+      defaultModel: {
+        id: "gpt-5",
+        params: [
+          { id: "reasoning_effort", value: "low" },
+          { id: "verbosity", value: 7 } as unknown as { id: string; value: string },
+          { id: 42 as unknown as string, value: "low" },
+        ],
+      },
+    });
+    expect(readUserConfig().defaultModel).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+  });
+
+  it("drops the params field when no entries survive validation", () => {
+    writeUserConfig({
+      version: 1,
+      defaultModel: {
+        id: "gpt-5",
+        params: [{ id: "verbosity", value: 7 } as unknown as { id: string; value: string }],
+      },
+    });
+    const cfg = readUserConfig();
+    expect(cfg.defaultModel).toEqual({ id: "gpt-5" });
+    expect(cfg.defaultModel?.params).toBeUndefined();
+  });
 });
 
 describe("resolveDefaultModel resolution order", () => {
@@ -96,5 +138,21 @@ describe("resolveDefaultModel resolution order", () => {
     process.env[USER_CONFIG_ENV_MODEL] = "   ";
     const resolved = resolveDefaultModel(fallback);
     expect(resolved.source).toBe("fallback");
+  });
+
+  it("parses CURSOR_MODEL params via the same selector syntax", () => {
+    process.env[USER_CONFIG_ENV_MODEL] = "gpt-5:reasoning_effort=high";
+    const resolved = resolveDefaultModel(fallback);
+    expect(resolved).toEqual({
+      model: { id: "gpt-5", params: [{ id: "reasoning_effort", value: "high" }] },
+      source: "env",
+    });
+  });
+
+  it("falls through to config when CURSOR_MODEL is malformed", () => {
+    setDefaultModel({ id: "from-config" });
+    process.env[USER_CONFIG_ENV_MODEL] = "gpt-5:bad-param-no-equals";
+    const resolved = resolveDefaultModel(fallback);
+    expect(resolved).toEqual({ model: { id: "from-config" }, source: "config" });
   });
 });

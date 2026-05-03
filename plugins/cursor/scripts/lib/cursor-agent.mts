@@ -333,10 +333,15 @@ export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]>
 }
 
 /**
- * Confirm a ModelSelection.id is in the catalog. Throws on miss. Pass
- * `catalog` when you've already fetched the list (e.g. to share one fetch
- * between validation and a subsequent report) — otherwise the catalog is
- * fetched fresh.
+ * Confirm a ModelSelection.id is in the catalog, and (when the catalog
+ * advertises a `parameters` schema) that any supplied `params` are known
+ * keys with allowed values. Pass `catalog` when you've already fetched the
+ * list to share one fetch between validation and a subsequent report —
+ * otherwise the catalog is fetched fresh.
+ *
+ * If the catalog entry omits `parameters`, params are accepted unchanged
+ * for forward-compatibility — the SDK may surface new tunables before the
+ * plugin has been updated.
  */
 export async function validateModel(
   model: ModelSelection,
@@ -349,6 +354,25 @@ export async function validateModel(
     throw new ConfigurationError(
       `Model '${model.id}' is not available for this API key. Known models: ${known}`,
     );
+  }
+  const params = model.params ?? [];
+  if (params.length === 0) return match;
+  const definitions = match.parameters;
+  if (!definitions || definitions.length === 0) return match;
+  for (const p of params) {
+    const def = definitions.find((d) => d.id === p.id);
+    if (!def) {
+      const known = definitions.map((d) => d.id).join(", ") || "(none)";
+      throw new ConfigurationError(
+        `Model '${model.id}' does not accept param '${p.id}'. Known params: ${known}`,
+      );
+    }
+    if (def.values.length > 0 && !def.values.some((v) => v.value === p.value)) {
+      const allowed = def.values.map((v) => v.value).join(", ");
+      throw new ConfigurationError(
+        `Model '${model.id}' param '${p.id}' does not accept value '${p.value}'. Allowed: ${allowed}`,
+      );
+    }
   }
   return match;
 }

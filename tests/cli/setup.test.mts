@@ -138,6 +138,59 @@ describe("CLI: setup", () => {
     expect(readUserConfig().defaultModel).toBeUndefined();
   });
 
+  it("--set-model persists variant params from the id:k=v selector syntax", async () => {
+    sdkMocks.modelsList.mockResolvedValue([
+      {
+        id: "gpt-5",
+        displayName: "GPT 5",
+        parameters: [
+          {
+            id: "reasoning_effort",
+            values: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+          },
+        ],
+      },
+    ]);
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("setup", "--set-model", "gpt-5:reasoning_effort=low"), io),
+    ).toBe(0);
+    expect(readUserConfig().defaultModel).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("| Default | gpt-5:reasoning_effort=low |");
+  });
+
+  it("--set-model rejects param values absent from the catalog", async () => {
+    sdkMocks.modelsList.mockResolvedValue([
+      {
+        id: "gpt-5",
+        displayName: "GPT 5",
+        parameters: [
+          {
+            id: "reasoning_effort",
+            values: [{ value: "low" }, { value: "high" }],
+          },
+        ],
+      },
+    ]);
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("setup", "--set-model", "gpt-5:reasoning_effort=extreme"), io),
+    ).toBe(1);
+    expect(io.captured.stderr.join("")).toContain("extreme");
+    expect(readUserConfig().defaultModel).toBeUndefined();
+  });
+
+  it("--set-model rejects malformed selector syntax", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup", "--set-model", "gpt-5:reasoning_effort"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("expected key=value");
+    expect(readUserConfig().defaultModel).toBeUndefined();
+  });
+
   it("--clear-model removes the persisted default", async () => {
     const setIo = captureIO(workDir);
     await companionMain(argv("setup", "--set-model", "gpt-5"), setIo);

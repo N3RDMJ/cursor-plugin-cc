@@ -2,6 +2,7 @@ import path from "node:path";
 
 import type { ModelSelection } from "@cursor/sdk";
 
+import { parseModelArg } from "./model-arg.mjs";
 import { readJson, resolveStateRoot, type StateLocator, writeJsonAtomic } from "./state.mjs";
 
 export interface UserConfig {
@@ -20,7 +21,15 @@ export function readUserConfig(opts: StateLocator = {}): UserConfig {
   if (!data || typeof data !== "object") return { version: 1 };
   const out: UserConfig = { version: 1 };
   if (data.defaultModel && typeof data.defaultModel === "object" && data.defaultModel.id) {
-    out.defaultModel = data.defaultModel;
+    const next: ModelSelection = { id: data.defaultModel.id };
+    if (Array.isArray(data.defaultModel.params)) {
+      const params = data.defaultModel.params.filter(
+        (p): p is { id: string; value: string } =>
+          !!p && typeof p === "object" && typeof p.id === "string" && typeof p.value === "string",
+      );
+      if (params.length > 0) next.params = params;
+    }
+    out.defaultModel = next;
   }
   return out;
 }
@@ -52,8 +61,16 @@ export function resolveDefaultModel(
   fallback: ModelSelection,
   opts: StateLocator = {},
 ): ResolvedDefaultModel {
-  const envId = process.env[USER_CONFIG_ENV_MODEL]?.trim();
-  if (envId) return { model: { id: envId }, source: "env" };
+  const envValue = process.env[USER_CONFIG_ENV_MODEL]?.trim();
+  if (envValue) {
+    try {
+      return { model: parseModelArg(envValue), source: "env" };
+    } catch {
+      /* malformed env value falls through to config / fallback rather than
+         crashing every command — `/cursor:setup` reports the resolved
+         default so users still see what's in effect. */
+    }
+  }
 
   const cfg = readUserConfig(opts);
   if (cfg.defaultModel) return { model: cfg.defaultModel, source: "config" };
