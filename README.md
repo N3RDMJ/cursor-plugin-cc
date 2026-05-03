@@ -324,6 +324,38 @@ leaving orphan agents burning Cursor usage. Set
 `CURSOR_PLUGIN_KEEP_BACKGROUND_JOBS=1` to opt out and let the 30-minute
 stale-job reconciler handle them instead.
 
+## Development
+
+For local development, use `--plugin-dir` to load the plugin directly from your working tree — no install or cache involved:
+
+```bash
+claude --plugin-dir ./plugins/cursor
+```
+
+Edit files, then run `/reload-plugins` inside the session to pick up changes instantly.
+
+The plugin uses commit-SHA versioning (no hardcoded version in `plugin.json`), so every push to the marketplace source triggers auto-update for installed users.
+
+### Running tests
+
+```bash
+npm test              # unit + CLI tests
+npm run typecheck     # type checking
+npm run check         # Biome lint + format
+npm run build         # tsc + esbuild bundle
+```
+
+### Releasing
+
+Releases are tag-driven. Push a `v*` tag to trigger the GitHub Actions release workflow:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow runs the full CI suite, then creates a GitHub Release with auto-generated notes.
+
 ## FAQ
 
 ### Do I need a separate Cursor account?
