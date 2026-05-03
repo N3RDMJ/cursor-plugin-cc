@@ -223,7 +223,6 @@ describe("CLI: setup", () => {
       ok: false,
       attemptedAt: "2026-05-03T00:00:00Z",
       error: "ENETUNREACH: network unreachable",
-      source: "bootstrap",
       command: "npm install --omit=dev",
     });
     const io = captureIO(workDir);
@@ -232,20 +231,30 @@ describe("CLI: setup", () => {
     expect(out).toContain("bootstrap failed: ENETUNREACH: network unreachable");
   });
 
+  it("a stale ok=false bootstrap status is overridden when the SDK is loadable", async () => {
+    installMocks.isSdkInstalled.mockReturnValue(true);
+    installMocks.readBootstrapStatus.mockReturnValue({
+      ok: false,
+      attemptedAt: "2026-05-01T00:00:00Z",
+      error: "old failure the user fixed manually",
+    });
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("setup"), io)).toBe(0);
+    expect(io.captured.stdout.join("")).toContain("| SDK | ok |");
+  });
+
   it("--json includes the sdk and bootstrap fields", async () => {
     installMocks.isSdkInstalled.mockReturnValue(false);
     installMocks.readBootstrapStatus.mockReturnValue({
       ok: false,
       attemptedAt: "2026-05-03T00:00:00Z",
       error: "boom",
-      source: "bootstrap",
     });
     const io = captureIO(workDir);
     expect(await companionMain(argv("setup", "--json"), io)).toBe(1);
     const report = JSON.parse(io.captured.stdout.join(""));
     expect(report.sdk.ok).toBe(false);
     expect(report.sdk.bootstrap.error).toBe("boom");
-    expect(report.sdk.remediation).toContain("--install");
   });
 
   it("--install runs the installer and reports success", async () => {

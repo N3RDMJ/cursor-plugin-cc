@@ -10,24 +10,13 @@ export const BOOTSTRAP_STATUS_FILENAME = ".bootstrap-status.json";
 export const BOOTSTRAP_SENTINEL_FILENAME = ".bootstrap-ok";
 
 export interface BootstrapStatus {
-  /** True when the most recent install completed and the SDK is loadable. */
   ok: boolean;
-  /** Error message captured from the failing command (stderr tail or thrown reason). */
-  error?: string;
-  /** ISO timestamp of the most recent attempt. */
   attemptedAt: string;
-  /** Wall-clock duration of the install in milliseconds, when measured. */
+  error?: string;
   durationMs?: number;
-  /** Origin tag — `bootstrap` (SessionStart) vs `setup --install` (interactive). */
-  source?: "bootstrap" | "setup";
-  /** The npm command that was run, for the user to repeat manually. */
   command?: string;
 }
 
-/**
- * Resolve the plugin root from the env (set by Claude Code) or by walking up
- * from this module's location. Used by both bootstrap.mjs and setup.
- */
 export function resolvePluginRoot(): string {
   const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (envRoot && envRoot.trim() !== "") return path.resolve(envRoot);
@@ -48,10 +37,8 @@ function sentinelPath(pluginRoot: string): string {
 }
 
 /**
- * True when `@cursor/sdk` is resolvable. Checks the plugin's local
- * `node_modules` first (the production layout written by bootstrap.mjs), then
- * falls back to Node.js's normal resolution from this module's location, which
- * picks up hoisted/monorepo installs (dev and test environments).
+ * Direct `node_modules/@cursor/sdk` lookup first (the production layout written
+ * by bootstrap.mjs), then Node.js resolution for hoisted/monorepo installs.
  */
 export function isSdkInstalled(pluginRoot: string): boolean {
   const direct = path.join(pluginNodeModules(pluginRoot), "@cursor", "sdk", "package.json");
@@ -63,11 +50,6 @@ export function isSdkInstalled(pluginRoot: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** True when the bootstrap sentinel was written by a previous successful install. */
-export function hasBootstrapSentinel(pluginRoot: string): boolean {
-  return fs.existsSync(sentinelPath(pluginRoot));
 }
 
 export function readBootstrapStatus(pluginRoot: string): BootstrapStatus | undefined {
@@ -84,11 +66,7 @@ export function writeBootstrapSentinel(pluginRoot: string): void {
 }
 
 export interface InstallOptions {
-  /** Per-attempt timeout in milliseconds. Defaults to 120s. */
   timeoutMs?: number;
-  /** Tag stored on the resulting status. */
-  source?: "bootstrap" | "setup";
-  /** When provided, install output is teed to this stream (line-buffered). */
   onOutput?: (chunk: string) => void;
 }
 
@@ -99,11 +77,6 @@ export interface InstallResult {
   command: string;
 }
 
-/**
- * Run `npm install --omit=dev` in the plugin root. Captures stdout+stderr,
- * forwards both to `onOutput` when provided, and resolves with a structured
- * result. Never throws — the caller decides how to surface a failed install.
- */
 export function runNpmInstall(
   pluginRoot: string,
   options: InstallOptions = {},
@@ -137,21 +110,22 @@ export function runNpmInstall(
       return;
     }
 
-    let stderrTail = "";
+    // npm puts diagnostics on both streams (ERR! lines on stderr, but progress
+    // and some failures on stdout); merge them so the persisted error tail
+    // doesn't drop one half.
+    let outputTail = "";
     const collect = (chunk: Buffer): void => {
       const text = chunk.toString("utf8");
-      stderrTail = (stderrTail + text).slice(-2048);
+      outputTail = (outputTail + text).slice(-2048);
       options.onOutput?.(text);
     };
-    child.stdout?.on("data", (chunk: Buffer) => options.onOutput?.(chunk.toString("utf8")));
+    child.stdout?.on("data", collect);
     child.stderr?.on("data", collect);
 
     const timer = setTimeout(() => {
       try {
         child.kill("SIGTERM");
-      } catch {
-        /* best-effort */
-      }
+      } catch {}
       finish({
         ok: false,
         error: `npm install timed out after ${timeoutMs}ms`,
@@ -178,7 +152,7 @@ export function runNpmInstall(
         const reason = signal
           ? `npm install terminated by signal ${signal}`
           : `npm install exited with code ${code}`;
-        const detail = stderrTail.trim();
+        const detail = outputTail.trim();
         finish({
           ok: false,
           error: detail ? `${reason}: ${detail}` : reason,
@@ -190,7 +164,6 @@ export function runNpmInstall(
   });
 }
 
-/** Convenience: install + persist status + write sentinel on success. */
 export async function installAndRecord(
   pluginRoot: string,
   options: InstallOptions = {},
@@ -201,14 +174,11 @@ export async function installAndRecord(
     attemptedAt: new Date().toISOString(),
     durationMs: result.durationMs,
     command: result.command,
-    ...(options.source ? { source: options.source } : {}),
     ...(result.error ? { error: result.error } : {}),
   };
   try {
     writeBootstrapStatus(pluginRoot, status);
     if (result.ok) writeBootstrapSentinel(pluginRoot);
-  } catch {
-    /* status is best-effort; the install result is the primary signal */
-  }
+  } catch {}
   return result;
 }

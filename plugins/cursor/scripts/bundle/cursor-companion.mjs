@@ -552,13 +552,13 @@ function runNpmInstall(pluginRoot, options = {}) {
       });
       return;
     }
-    let stderrTail = "";
+    let outputTail = "";
     const collect = (chunk) => {
       const text = chunk.toString("utf8");
-      stderrTail = (stderrTail + text).slice(-2048);
+      outputTail = (outputTail + text).slice(-2048);
       options.onOutput?.(text);
     };
-    child.stdout?.on("data", (chunk) => options.onOutput?.(chunk.toString("utf8")));
+    child.stdout?.on("data", collect);
     child.stderr?.on("data", collect);
     const timer = setTimeout(() => {
       try {
@@ -587,7 +587,7 @@ function runNpmInstall(pluginRoot, options = {}) {
         finish({ ok: true, durationMs: Date.now() - start, command });
       } else {
         const reason = signal ? `npm install terminated by signal ${signal}` : `npm install exited with code ${code}`;
-        const detail = stderrTail.trim();
+        const detail = outputTail.trim();
         finish({
           ok: false,
           error: detail ? `${reason}: ${detail}` : reason,
@@ -605,7 +605,6 @@ async function installAndRecord(pluginRoot, options = {}) {
     attemptedAt: (/* @__PURE__ */ new Date()).toISOString(),
     durationMs: result.durationMs,
     command: result.command,
-    ...options.source ? { source: options.source } : {},
     ...result.error ? { error: result.error } : {}
   };
   try {
@@ -693,12 +692,10 @@ function modelChoices(models) {
 var INSTALL_REMEDIATION = "Run /cursor:setup --install to (re)install the SDK.";
 function buildSdkReport() {
   const pluginRoot = resolvePluginRoot();
-  const installed = isSdkInstalled(pluginRoot);
+  const ok = isSdkInstalled(pluginRoot);
   const bootstrap = readBootstrapStatus(pluginRoot);
-  const ok = installed && bootstrap?.ok !== false;
   const sdk = { ok, pluginRoot };
   if (bootstrap) sdk.bootstrap = bootstrap;
-  if (!ok) sdk.remediation = INSTALL_REMEDIATION;
   return sdk;
 }
 function errorMessage(reason) {
@@ -776,21 +773,17 @@ function renderReport(report) {
   }
   if (!report.sdk.ok) {
     lines.push("");
-    lines.push(`> ${report.sdk.remediation ?? INSTALL_REMEDIATION}`);
+    lines.push(`> ${INSTALL_REMEDIATION}`);
   }
   return `${lines.join("\n")}
 `;
 }
 function describeSdk(sdk) {
   if (sdk.ok) {
-    if (sdk.bootstrap?.ok && sdk.bootstrap.attemptedAt) {
-      return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
-    }
+    if (sdk.bootstrap?.ok) return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
     return "installed";
   }
-  if (sdk.bootstrap?.error) {
-    return `bootstrap failed: ${sdk.bootstrap.error}`;
-  }
+  if (sdk.bootstrap?.error) return `bootstrap failed: ${sdk.bootstrap.error}`;
   return "not installed";
 }
 function describeSource(source) {
@@ -903,7 +896,6 @@ async function runInstall(io, json) {
 `);
   }
   const result = await installAndRecord(pluginRoot, {
-    source: "setup",
     onOutput: json ? void 0 : (chunk) => io.stderr.write(chunk)
   });
   if (json) {

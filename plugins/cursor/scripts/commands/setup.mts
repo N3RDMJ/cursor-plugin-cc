@@ -122,7 +122,6 @@ interface SetupReport {
     ok: boolean;
     pluginRoot: string;
     bootstrap?: BootstrapStatus;
-    remediation?: string;
   };
   apiKey: { ok: boolean; source?: KeySource; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
@@ -141,12 +140,12 @@ const INSTALL_REMEDIATION = "Run /cursor:setup --install to (re)install the SDK.
 
 function buildSdkReport(): SetupReport["sdk"] {
   const pluginRoot = resolvePluginRoot();
-  const installed = isSdkInstalled(pluginRoot);
+  // A loadable SDK overrides a stale `ok: false` from a prior failed bootstrap
+  // (e.g. the user fixed the install manually) — otherwise the row would lie.
+  const ok = isSdkInstalled(pluginRoot);
   const bootstrap = readBootstrapStatus(pluginRoot);
-  const ok = installed && bootstrap?.ok !== false;
   const sdk: SetupReport["sdk"] = { ok, pluginRoot };
   if (bootstrap) sdk.bootstrap = bootstrap;
-  if (!ok) sdk.remediation = INSTALL_REMEDIATION;
   return sdk;
 }
 
@@ -237,21 +236,17 @@ function renderReport(report: SetupReport): string {
   }
   if (!report.sdk.ok) {
     lines.push("");
-    lines.push(`> ${report.sdk.remediation ?? INSTALL_REMEDIATION}`);
+    lines.push(`> ${INSTALL_REMEDIATION}`);
   }
   return `${lines.join("\n")}\n`;
 }
 
 function describeSdk(sdk: SetupReport["sdk"]): string {
   if (sdk.ok) {
-    if (sdk.bootstrap?.ok && sdk.bootstrap.attemptedAt) {
-      return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
-    }
+    if (sdk.bootstrap?.ok) return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
     return "installed";
   }
-  if (sdk.bootstrap?.error) {
-    return `bootstrap failed: ${sdk.bootstrap.error}`;
-  }
+  if (sdk.bootstrap?.error) return `bootstrap failed: ${sdk.bootstrap.error}`;
   return "not installed";
 }
 
@@ -363,7 +358,6 @@ async function runInstall(io: CommandIO, json: boolean): Promise<ExitCode> {
     io.stdout.write(`Installing @cursor/sdk in ${pluginRoot}\n`);
   }
   const result = await installAndRecord(pluginRoot, {
-    source: "setup",
     onOutput: json ? undefined : (chunk) => io.stderr.write(chunk),
   });
 

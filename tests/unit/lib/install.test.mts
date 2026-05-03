@@ -1,9 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   type BootstrapStatus,
-  hasBootstrapSentinel,
   isSdkInstalled,
   readBootstrapStatus,
   resolvePluginRoot,
@@ -52,7 +51,6 @@ describe("install.mts", () => {
       attemptedAt: "2026-05-03T00:00:00Z",
       error: "boom",
       durationMs: 12,
-      source: "bootstrap",
       command: "npm install --omit=dev",
     };
     writeBootstrapStatus(pluginRoot, status);
@@ -64,11 +62,10 @@ describe("install.mts", () => {
   });
 
   it("writeBootstrapSentinel creates node_modules/.bootstrap-ok", () => {
-    expect(hasBootstrapSentinel(pluginRoot)).toBe(false);
+    const sentinel = path.join(pluginRoot, "node_modules", ".bootstrap-ok");
+    expect(existsSync(sentinel)).toBe(false);
     writeBootstrapSentinel(pluginRoot);
-    expect(hasBootstrapSentinel(pluginRoot)).toBe(true);
-    const contents = readFileSync(path.join(pluginRoot, "node_modules", ".bootstrap-ok"), "utf8");
-    expect(contents).toMatch(/\d{4}-\d{2}-\d{2}T/);
+    expect(readFileSync(sentinel, "utf8")).toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
 
   it("runNpmInstall returns a structured failure when npm exits non-zero", async () => {

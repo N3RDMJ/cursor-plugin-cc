@@ -38,15 +38,13 @@ if (needsInstall) {
     error = stderr ? `${message}: ${stderr.slice(-1024)}` : message;
   }
 
-  // Persist the result so /cursor:setup can surface bootstrap failures
-  // instead of leaving the user staring at a generic SDK-load error.
+  // /cursor:setup reads this file to surface bootstrap failures.
   try {
     mkdirSync(nodeModules, { recursive: true });
     const status = {
       ok,
       attemptedAt: new Date().toISOString(),
       durationMs: Date.now() - startedAt,
-      source: "bootstrap",
       command,
       ...(error ? { error } : {}),
     };
