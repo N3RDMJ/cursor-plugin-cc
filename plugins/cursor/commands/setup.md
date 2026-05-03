@@ -44,11 +44,11 @@ relay the error.
 
 **Do not** echo the key back or include it in any output beyond the command.
 
-Alternatively, mention the user can run `cursor-login.sh` from a separate
-terminal for secure hidden input:
+Alternatively, mention the user can run this from a separate terminal for
+secure hidden input (the key is never visible):
 
 ```
-./plugins/cursor/scripts/cursor-login.sh
+~/.claude/cursor-login
 ```
 
 ## When `--logout` is passed

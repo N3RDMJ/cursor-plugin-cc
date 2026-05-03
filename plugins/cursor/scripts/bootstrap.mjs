@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import { execSync } from "node:child_process";
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +20,23 @@ const nodeModules = join(pluginRoot, "node_modules");
 const sdkDir = join(nodeModules, "@cursor", "sdk");
 const sentinel = join(nodeModules, ".bootstrap-ok");
 const statusFile = join(nodeModules, ".bootstrap-status.json");
+
+// Place a convenience symlink at ~/.claude/cursor-login so users can
+// store their API key from any terminal without knowing the plugin path.
+try {
+  const loginScript = join(pluginRoot, "scripts", "cursor-login.sh");
+  const link = join(homedir(), ".claude", "cursor-login");
+  if (existsSync(loginScript)) {
+    try {
+      unlinkSync(link);
+    } catch {
+      /* not present */
+    }
+    symlinkSync(loginScript, link);
+  }
+} catch {
+  // Best-effort — non-critical.
+}
 
 const needsInstall = !existsSync(sdkDir) || !existsSync(sentinel);
 
