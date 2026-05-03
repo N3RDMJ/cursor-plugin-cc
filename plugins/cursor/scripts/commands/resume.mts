@@ -14,6 +14,7 @@ import {
   markFailed,
   type RecentTaskAgent,
 } from "../lib/job-control.mjs";
+import { optionalModelArg } from "../lib/model-arg.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { ageFromIso, compactText } from "../lib/render.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
@@ -42,7 +43,10 @@ flags:
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
   --cloud              Use Cursor cloud against the detected GitHub origin
-  --model <id>, -m
+  --model <id[:k=v,...]>, -m
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
   --timeout <ms>       Cancel the run if it exceeds this duration
   --json               Print the final result as JSON (single line)
   --help, -h
@@ -158,8 +162,7 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     cloud,
     json,
   };
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

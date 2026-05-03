@@ -1,7 +1,7 @@
 import type { ModelSelection, SDKModel } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
+import { bool, parseArgs, UsageError } from "../lib/args.mjs";
 import { deleteApiKey, detectBackend, type KeySource, storeApiKey } from "../lib/credentials.mjs";
 import {
   DEFAULT_MODEL,
@@ -18,6 +18,7 @@ import {
   readBootstrapStatus,
   resolvePluginRoot,
 } from "../lib/install.mjs";
+import { formatModelSelection, optionalModelArg } from "../lib/model-arg.mjs";
 import { escapeMarkdownCell } from "../lib/render.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
 import {
@@ -61,8 +62,15 @@ Stop review gate (per workspace, opt-in):
   --disable-gate       Turn off the Stop review gate for this workspace
 
 Default model (user-wide, used when --model is not passed):
-  --set-model <id>     Persist <id> as the default for new agent runs.
-                       Validated against Cursor.models.list().
+  --set-model <id[:k=v,...]>
+                       Persist a model selection as the default for new
+                       agent runs. Append \`:key=value,key=value\` to set
+                       variant params (e.g. effort level):
+                         --set-model gpt-5
+                         --set-model gpt-5:reasoning_effort=low
+                         --set-model gpt-5:reasoning_effort=high,verbosity=low
+                       Validated against Cursor.models.list() — the id and
+                       any param keys/values must be in the catalog.
   --clear-model        Remove the persisted default (revert to ${DEFAULT_MODEL.id}).
                        Resolution order: --model flag > CURSOR_MODEL env >
                        persisted default > ${DEFAULT_MODEL.id} fallback.
@@ -94,12 +102,7 @@ export function modelChoices(models: Awaited<ReturnType<typeof listModels>>): Mo
     }
     for (const variant of variants) {
       const selection: ModelSelection = { id: model.id, params: variant.params };
-      const key = JSON.stringify({
-        id: selection.id,
-        params: [...(selection.params ?? [])]
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .map((p) => `${p.id}=${p.value}`),
-      });
+      const key = formatModelSelection(selection);
       if (seen.has(key)) continue;
       seen.add(key);
       const variantLabel = variant.displayName.trim();
@@ -126,7 +129,7 @@ interface SetupReport {
   apiKey: { ok: boolean; source?: KeySource; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
   models: { ok: boolean; choices: ModelChoice[]; error?: string };
-  defaultModel: { id: string; source: DefaultModelSource };
+  defaultModel: { id: string; selector: string; source: DefaultModelSource };
   gate: { enabled: boolean; workspaceRoot: string };
 }
 
@@ -161,7 +164,11 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
-    defaultModel: { id: resolved.model.id, source: resolved.source },
+    defaultModel: {
+      id: resolved.model.id,
+      selector: formatModelSelection(resolved.model),
+      source: resolved.source,
+    },
     gate: { enabled: input.gateEnabled, workspaceRoot: input.workspaceRoot },
   };
 
@@ -224,14 +231,14 @@ function renderReport(report: SetupReport): string {
   } else if (report.models.error) {
     row("Models", "fail", report.models.error);
   }
-  row("Default", report.defaultModel.id, describeSource(report.defaultModel.source));
+  row("Default", report.defaultModel.selector, describeSource(report.defaultModel.source));
   row("Stop gate", report.gate.enabled ? "on" : "off", `workspace: ${report.gate.workspaceRoot}`);
 
   if (report.models.ok && report.models.choices.length > 0) {
     lines.push("");
     lines.push("**Available models:**");
     for (const choice of report.models.choices) {
-      lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
+      lines.push(`- ${choice.label} \`[${formatModelSelection(choice.selection)}]\``);
     }
   }
   if (!report.sdk.ok) {
@@ -484,20 +491,17 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
   }
 
-  const setModelId = optionalString(parsed, "set-model");
+  const setModel = optionalModelArg(parsed, "set-model");
   const clearModel = bool(parsed, "clear-model");
-  if (setModelId && clearModel) {
+  if (setModel && clearModel) {
     throw new UsageError("--set-model and --clear-model are mutually exclusive");
-  }
-  if (setModelId !== undefined && setModelId.trim() === "") {
-    throw new UsageError("--set-model requires a non-empty model id");
   }
 
   let prefetchedCatalog: SDKModel[] | undefined;
-  if (setModelId) {
+  if (setModel) {
     prefetchedCatalog = await listModels();
-    await validateModel({ id: setModelId }, { catalog: prefetchedCatalog });
-    setDefaultModel({ id: setModelId });
+    await validateModel(setModel, { catalog: prefetchedCatalog });
+    setDefaultModel(setModel);
   } else if (clearModel) {
     clearDefaultModel();
   }

@@ -13,6 +13,7 @@ import {
 } from "../lib/cursor-agent.mjs";
 import { getBranch, getRecentCommits, getSourceTree } from "../lib/git.mjs";
 import { createJob, findRecentTaskAgents, markFailed } from "../lib/job-control.mjs";
+import { optionalModelArg } from "../lib/model-arg.mjs";
 import { interpolateTemplate, loadPromptTemplate } from "../lib/prompts.mjs";
 import { runAgentTaskBackground, runAgentTaskForeground } from "../lib/run-agent-task.mjs";
 import { ensureStateDir, resolveStateDir } from "../lib/state.mjs";
@@ -32,8 +33,11 @@ flags:
   --prompt-file <path> Read the prompt from a file. Concatenated with any
                        positional prompt text (positional first, file body
                        second, separated by a blank line).
-  --model <id>         Override the default model
-  -m <id>
+  --model <id[:k=v,...]>
+                       Override the default model. Append \`:key=value\`
+                       pairs to set variant params, e.g.
+                       --model gpt-5:reasoning_effort=low
+  -m <id[:k=v,...]>
   --timeout <ms>       Cancel the run if it exceeds this duration
   --json               Print the final result as JSON (single line)
   --help, -h
@@ -100,8 +104,7 @@ function parseFlags(args: readonly string[], cwd: string): TaskFlags {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json"),
   };
-  const modelId = optionalString(parsed, "model");
-  if (modelId) flags.model = { id: modelId };
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

@@ -130,19 +130,41 @@ The setup output's "Stop gate" row reports the current state.
 When `/cursor:task`, `/cursor:resume`, or any other command runs without an
 explicit `--model <id>`, the plugin resolves a default in this order:
 
-1. `--model <id>` flag on the command (per-invocation override)
+1. `--model <id[:k=v,...]>` flag on the command (per-invocation override)
 2. `CURSOR_MODEL` environment variable
 3. The persisted user-wide default (set via `--set-model`)
 4. Built-in fallback (`composer-2`)
 
-Manage the persisted default via `/cursor:setup`:
+### Selector syntax
 
-- `--set-model <id>` — validate `<id>` against the live catalog and persist
-  it as the default for every workspace. Subsequent runs use it unless
-  overridden.
+Every `--model` / `--set-model` / `CURSOR_MODEL` value uses the same syntax:
+
+```
+<id>                              # bare model id
+<id>:<key>=<value>                # model + one variant param (e.g. effort)
+<id>:<key>=<value>,<key>=<value>  # multiple params
+```
+
+Examples:
+
+- `gpt-5`
+- `gpt-5:reasoning_effort=low` — GPT-5 at low reasoning effort
+- `gpt-5:reasoning_effort=high,verbosity=low`
+
+The "Available models" section of `/cursor:setup` lists every catalog
+variant (e.g. `GPT 5 - low`, `GPT 5 - high`) along with its canonical
+selector in brackets — copy that selector verbatim into `--set-model` or
+`--model`.
+
+### Managing the persisted default
+
+- `--set-model <id[:k=v,...]>` — validate the selector against the live
+  catalog and persist it as the default for every workspace. Subsequent
+  runs use it unless overridden. Param keys/values are validated against
+  the model's parameter catalog when the SDK exposes one.
 - `--clear-model` — remove the persisted default and revert to the built-in
   fallback.
 
-The setup output's "Default" row shows the active model id and where it
-came from (`from --model`, `from CURSOR_MODEL env`, `from persisted default`,
-or `built-in fallback`).
+The setup output's "Default" row shows the active selector (id plus any
+params) and where it came from (`from --model`, `from CURSOR_MODEL env`,
+`from persisted default`, or `built-in fallback`).

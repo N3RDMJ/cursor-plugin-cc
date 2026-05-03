@@ -1,3 +1,86 @@
+// plugins/cursor/scripts/lib/args.mts
+var UsageError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "UsageError";
+  }
+};
+function parseArgs(argv, spec = {}) {
+  const long = spec.long ?? {};
+  const short = spec.short ?? {};
+  const flags = {};
+  const positionals = [];
+  let stopParsing = false;
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === void 0) continue;
+    if (stopParsing) {
+      positionals.push(arg);
+      continue;
+    }
+    if (arg === "--") {
+      stopParsing = true;
+      continue;
+    }
+    if (arg.startsWith("--")) {
+      const eqIdx = arg.indexOf("=");
+      const name = eqIdx === -1 ? arg.slice(2) : arg.slice(2, eqIdx);
+      const inlineValue = eqIdx === -1 ? void 0 : arg.slice(eqIdx + 1);
+      const kind = long[name];
+      if (kind === "boolean") {
+        if (inlineValue === "false") {
+          delete flags[name];
+        } else {
+          flags[name] = true;
+        }
+      } else if (kind === "string") {
+        if (inlineValue !== void 0) {
+          flags[name] = inlineValue;
+        } else {
+          const next = argv[i + 1];
+          if (next === void 0 || next.startsWith("-")) {
+            throw new UsageError(`expected value after --${name}`);
+          }
+          flags[name] = next;
+          i += 1;
+        }
+      } else {
+        if (inlineValue !== void 0) flags[name] = inlineValue;
+        else flags[name] = true;
+      }
+      continue;
+    }
+    if (arg.startsWith("-") && arg.length > 1) {
+      const shortName = arg.slice(1);
+      const longName = short[shortName];
+      if (!longName) {
+        throw new UsageError(`unknown short flag: ${arg}`);
+      }
+      const kind = long[longName];
+      if (kind === "string") {
+        const next = argv[i + 1];
+        if (next === void 0 || next.startsWith("-")) {
+          throw new UsageError(`expected value after ${arg}`);
+        }
+        flags[longName] = next;
+        i += 1;
+      } else {
+        flags[longName] = true;
+      }
+      continue;
+    }
+    positionals.push(arg);
+  }
+  return { positionals, flags };
+}
+function optionalString(parsed, name) {
+  const v = parsed.flags[name];
+  return typeof v === "string" ? v : void 0;
+}
+function bool(parsed, name) {
+  return parsed.flags[name] === true;
+}
+
 // plugins/cursor/scripts/lib/git.mts
 import { execFileSync } from "node:child_process";
 function runGit(cwd, args) {
@@ -419,6 +502,55 @@ async function withRetry(fn, options = {}) {
 
 // plugins/cursor/scripts/lib/user-config.mts
 import path2 from "node:path";
+
+// plugins/cursor/scripts/lib/model-arg.mts
+function parseModelArg(input) {
+  const trimmed = input.trim();
+  if (!trimmed) throw new UsageError("model selector is empty");
+  const colon = trimmed.indexOf(":");
+  if (colon === -1) return { id: trimmed };
+  const id = trimmed.slice(0, colon).trim();
+  const paramSpec = trimmed.slice(colon + 1).trim();
+  if (!id) throw new UsageError(`invalid model selector '${input}': missing id before ':'`);
+  if (!paramSpec) {
+    throw new UsageError(`invalid model selector '${input}': missing params after ':'`);
+  }
+  const params = paramSpec.split(",").map((pair) => {
+    const eq = pair.indexOf("=");
+    if (eq === -1) {
+      throw new UsageError(
+        `invalid model param '${pair}' in '${input}': expected key=value (e.g. reasoning_effort=low)`
+      );
+    }
+    const paramId = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (!paramId) throw new UsageError(`invalid model param '${pair}' in '${input}': empty key`);
+    if (!value) {
+      throw new UsageError(`invalid model param '${pair}' in '${input}': empty value`);
+    }
+    return { id: paramId, value };
+  });
+  const seen = /* @__PURE__ */ new Set();
+  for (const p of params) {
+    if (seen.has(p.id)) {
+      throw new UsageError(`invalid model selector '${input}': duplicate param '${p.id}'`);
+    }
+    seen.add(p.id);
+  }
+  return { id, params };
+}
+function formatModelSelection(model) {
+  if (!model.params || model.params.length === 0) return model.id;
+  const pairs = [...model.params].sort((a, b) => a.id.localeCompare(b.id)).map((p) => `${p.id}=${p.value}`).join(",");
+  return `${model.id}:${pairs}`;
+}
+function optionalModelArg(parsed, name) {
+  const raw = parsed.flags[name];
+  if (typeof raw !== "string") return void 0;
+  return parseModelArg(raw);
+}
+
+// plugins/cursor/scripts/lib/user-config.mts
 var USER_CONFIG_ENV_MODEL = "CURSOR_MODEL";
 function getUserConfigPath(opts = {}) {
   return path2.join(resolveStateRoot(opts), "config.json");
@@ -428,7 +560,14 @@ function readUserConfig(opts = {}) {
   if (!data || typeof data !== "object") return { version: 1 };
   const out = { version: 1 };
   if (data.defaultModel && typeof data.defaultModel === "object" && data.defaultModel.id) {
-    out.defaultModel = data.defaultModel;
+    const next = { id: data.defaultModel.id };
+    if (Array.isArray(data.defaultModel.params)) {
+      const params = data.defaultModel.params.filter(
+        (p) => !!p && typeof p === "object" && typeof p.id === "string" && typeof p.value === "string"
+      );
+      if (params.length > 0) next.params = params;
+    }
+    out.defaultModel = next;
   }
   return out;
 }
@@ -446,8 +585,18 @@ function clearDefaultModel(opts = {}) {
   return rest;
 }
 function resolveDefaultModel(fallback, opts = {}) {
-  const envId = process.env[USER_CONFIG_ENV_MODEL]?.trim();
-  if (envId) return { model: { id: envId }, source: "env" };
+  const envValue = process.env[USER_CONFIG_ENV_MODEL]?.trim();
+  if (envValue) {
+    try {
+      return { model: parseModelArg(envValue), source: "env" };
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(
+        `cursor-plugin: ignoring malformed ${USER_CONFIG_ENV_MODEL}='${envValue}' (${detail})
+`
+      );
+    }
+  }
   const cfg = readUserConfig(opts);
   if (cfg.defaultModel) return { model: cfg.defaultModel, source: "config" };
   return { model: fallback, source: "fallback" };
@@ -580,6 +729,25 @@ async function validateModel(model, opts = {}) {
     throw new ConfigurationError(
       `Model '${model.id}' is not available for this API key. Known models: ${known}`
     );
+  }
+  const params = model.params ?? [];
+  if (params.length === 0) return match;
+  const definitions = match.parameters;
+  if (!definitions || definitions.length === 0) return match;
+  for (const p of params) {
+    const def = definitions.find((d) => d.id === p.id);
+    if (!def) {
+      const known = definitions.map((d) => d.id).join(", ") || "(none)";
+      throw new ConfigurationError(
+        `Model '${model.id}' does not accept param '${p.id}'. Known params: ${known}`
+      );
+    }
+    if (def.values.length > 0 && !def.values.some((v) => v.value === p.value)) {
+      const allowed = def.values.map((v) => v.value).join(", ");
+      throw new ConfigurationError(
+        `Model '${model.id}' param '${p.id}' does not accept value '${p.value}'. Allowed: ${allowed}`
+      );
+    }
   }
   return match;
 }
@@ -981,6 +1149,10 @@ function resolveWorkspaceRoot(cwd) {
 }
 
 export {
+  UsageError,
+  parseArgs,
+  optionalString,
+  bool,
   detectBackend,
   storeApiKey,
   deleteApiKey,
@@ -990,6 +1162,8 @@ export {
   getBranch,
   resolveReviewTarget,
   getSourceTree,
+  formatModelSelection,
+  optionalModelArg,
   resolveStateDir,
   ensureStateDir,
   writeJsonAtomic,

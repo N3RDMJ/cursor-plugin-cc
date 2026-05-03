@@ -177,4 +177,29 @@ describe("CLI: task", () => {
       "task requires a prompt argument or --prompt-file",
     );
   });
+
+  it("--model id:k=v forwards variant params to Agent.create", async () => {
+    const run = makeRun({
+      events: [assistantText("run-model", "ok")],
+      result: { id: "run-model", status: "finished" },
+    });
+    sdkMocks.agentCreate.mockResolvedValue(fakeAgent(run));
+
+    const io = captureIO(workDir);
+    expect(
+      await companionMain(argv("task", "do thing", "--model", "gpt-5:reasoning_effort=low"), io),
+    ).toBe(0);
+
+    const call = sdkMocks.agentCreate.mock.calls[0]?.[0];
+    expect(call?.model).toEqual({
+      id: "gpt-5",
+      params: [{ id: "reasoning_effort", value: "low" }],
+    });
+  });
+
+  it("--model rejects malformed selector syntax with exit code 2", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("task", "do thing", "--model", "gpt-5:no-equals"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("expected key=value");
+  });
 });

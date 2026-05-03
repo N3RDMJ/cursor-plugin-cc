@@ -1,6 +1,6 @@
 ---
 description: Delegate investigation, an explicit fix request, or follow-up task to a Cursor agent
-argument-hint: "[--background|--wait] [--resume-last|--fresh] [--model <id>] [--write] [what Cursor should investigate, solve, or continue]"
+argument-hint: "[--background|--wait] [--resume-last|--fresh] [--model <id[:k=v,...]>] [--write] [what Cursor should investigate, solve, or continue]"
 allowed-tools: Bash(node:*), AskUserQuestion, Agent
 disable-model-invocation: true
 ---
@@ -58,4 +58,9 @@ Operating rules:
 - If the helper reports that Cursor is not configured or `CURSOR_API_KEY` is missing, stop and tell the user to run `/cursor:setup`.
 - If the user did not supply a request, ask what Cursor should investigate or fix.
 
-Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default (set via `/cursor:setup --set-model <id>`) > built-in fallback.
+Model resolution: `--model` flag > `CURSOR_MODEL` env > persisted default (set via `/cursor:setup --set-model <id[:k=v,...]>`) > built-in fallback.
+
+Effort / variant params: append `:key=value` pairs after the id to set
+variant params such as reasoning effort, e.g. `--model gpt-5:reasoning_effort=low`.
+Multiple params combine with commas: `--model gpt-5:reasoning_effort=high,verbosity=low`.
+See `/cursor:setup` for the list of available models and their variants.
