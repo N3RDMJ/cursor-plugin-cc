@@ -31,12 +31,15 @@ Use [Cursor](https://cursor.com) as a second AI agent from inside [Claude Code](
 
 **Set up your API key once:**
 
-Recommended: export `CURSOR_API_KEY` in your shell profile, then start a new
-Claude Code session:
+Recommended: add `CURSOR_API_KEY` to your shell profile once, then start a new
+Claude Code session. Copy this command, replace `key_...` with your Cursor API
+key, and run it in your normal terminal:
 
 ```bash
-export CURSOR_API_KEY="key_..."
+echo 'export CURSOR_API_KEY="key_..."' >> ~/.bashrc
 ```
+
+Use `~/.zshrc` instead of `~/.bashrc` if you use zsh.
 
 If you prefer OS keychain storage, run the local helper from a normal terminal.
 It prompts locally with masked input and keeps the key out of Claude Code chat:
