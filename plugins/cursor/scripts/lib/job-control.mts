@@ -24,6 +24,14 @@ export const TERMINAL_STATUSES: ReadonlySet<JobStatus> = new Set([
   "cancelled",
 ]);
 
+/**
+ * Reason stamped on a cancelled job when the in-memory `Run` is not reachable
+ * from this process — typically because a previous CLI invocation started it
+ * in `--background` mode. Exported so `cancel` can detect this case and warn
+ * loudly that the SDK run may still be live.
+ */
+export const RUN_NOT_ACTIVE_REASON = "run-not-active";
+
 const STALE_JOB_TTL_MS = 30 * 60 * 1000;
 
 const JOB_ID_BYTES = 6; // 12 hex chars — short, collision-resistant enough for ~50 retained jobs
@@ -351,8 +359,8 @@ export async function cancelJob(stateDir: string, jobId: string): Promise<Cancel
 
   const run = activeRuns.get(jobId);
   if (!run) {
-    const updated = markCancelled(stateDir, jobId, "run-not-active");
-    return { cancelled: true, reason: "run-not-active", job: updated };
+    const updated = markCancelled(stateDir, jobId, RUN_NOT_ACTIVE_REASON);
+    return { cancelled: true, reason: RUN_NOT_ACTIVE_REASON, job: updated };
   }
 
   const result = await cancelRun(run);

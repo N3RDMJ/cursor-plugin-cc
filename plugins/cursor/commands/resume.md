@@ -18,11 +18,17 @@ Usage:
 
 - `<agent-id> <prompt>` — resume a specific agent with a follow-up prompt
 - `--last <prompt>`     — resume the most recent task agent for this workspace
-- `--list`              — print known agent ids from the local job index
-- `--list --remote`     — query the SDK for durable agents (local runtime by
+- `--list`              — print known agent ids — merges this workspace's
+                          local job index with the SDK's durable agent list
+                          (local runtime). Soft-fails on SDK errors with a
+                          stderr footer.
+- `--list --local`      — only show this workspace's job index (skips the SDK)
+- `--list --remote`     — only show the SDK's durable agents (local runtime by
                           default; combine with `--cloud` for cloud-runtime
                           agents — that needs `CURSOR_API_KEY`)
-- `--limit <n>` and `--json` apply to `--list`
+- `--limit <n>` and `--json` apply to `--list`. The merged-mode JSON shape is
+  `{local: [...], remoteOnly: [...], remoteError: string | null}`. Pass
+  `--local --json` for the flat array of local rows.
 
 Inherits the same flags as `/cursor:task`: `--write`, `--background`, `--force`,
 `--cloud`, `--model <id>`, `--timeout <ms>`, `--json`.

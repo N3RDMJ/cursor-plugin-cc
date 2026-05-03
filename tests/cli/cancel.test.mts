@@ -25,13 +25,16 @@ afterEach(() => {
 });
 
 describe("CLI: cancel", () => {
-  it("cancels a running job (no active run) with reason=run-not-active", async () => {
+  it("cancels a running job (no active run) with reason=run-not-active and a stderr warning", async () => {
     const job = createJob(stateDir, { type: "task", prompt: "do thing" });
     markRunning(stateDir, job.id, { agentId: "a-1", runId: "r-1" });
 
     const io = captureIO(workDir);
     expect(await companionMain(argv("cancel", job.id), io)).toBe(0);
     expect(io.captured.stdout.join("")).toContain("run-not-active");
+    const stderr = io.captured.stderr.join("");
+    expect(stderr).toContain("did not own the in-memory Run");
+    expect(stderr).toContain("/cursor:resume a-1");
   });
 
   it("refuses to cancel a completed job (exit 1, reason='job is completed')", async () => {
@@ -59,6 +62,7 @@ describe("CLI: cancel", () => {
     const parsed = JSON.parse(io.captured.stdout.join(""));
     expect(parsed.cancelled).toBe(true);
     expect(parsed.reason).toBe("run-not-active");
+    expect(parsed.splitBrain).toBe(true);
     expect(parsed.job.id).toBe(job.id);
     expect(parsed.job.status).toBe("cancelled");
   });

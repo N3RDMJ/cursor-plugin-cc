@@ -1,7 +1,7 @@
 import type { AgentEvent } from "./cursor-agent.mjs";
 import { TERMINAL_STATUSES } from "./job-control.mjs";
 import { redactError } from "./redact.mjs";
-import type { JobIndexEntry } from "./state.mjs";
+import type { JobIndexEntry, JobRecord } from "./state.mjs";
 
 /**
  * Format a duration in milliseconds for terminal display. Sub-second values
@@ -388,6 +388,65 @@ export function jobAgentHandoffLines(agentId: string | undefined): string[] {
     `- Continue from Claude Code: \`/cursor:resume ${agentId}\``,
     `- Continue from the Cursor CLI: \`cursor-agent resume ${agentId}\``,
   ];
+}
+
+/**
+ * Wrap a task job's raw output in a header card so users see status, duration,
+ * and the agent-id handoff alongside the model reply. Mirrors what
+ * `renderReviewResult` does for reviews. The `result` body is fenced (no markup
+ * passthrough) — Cursor output frequently contains its own backticks/markdown.
+ */
+export function renderTaskResultCard(job: JobRecord): string {
+  const lines: string[] = [];
+  lines.push(`**Job:** \`${job.id}\` _(type: ${job.type})_`);
+
+  const statusBits: string[] = [`\`${job.status}\``];
+  if (typeof job.durationMs === "number") {
+    statusBits.push(`duration: ${formatDuration(job.durationMs)}`);
+  } else if (job.startedAt && job.finishedAt) {
+    const start = Date.parse(job.startedAt);
+    const finish = Date.parse(job.finishedAt);
+    if (Number.isFinite(start) && Number.isFinite(finish) && finish >= start) {
+      statusBits.push(`duration: ${formatDuration(finish - start)}`);
+    }
+  }
+  lines.push(`**Status:** ${statusBits.join(" — ")}`);
+
+  if (job.agentId) lines.push(`**Agent:** \`${job.agentId}\``);
+  if (job.runId) lines.push(`**Run:** \`${job.runId}\``);
+
+  if (job.metadata) {
+    const meta = job.metadata as Record<string, unknown>;
+    if (meta.timedOut === true) {
+      lines.push("**Note:** run exceeded its timeout and was cancelled by the plugin.");
+    }
+    if (meta.expired === true) {
+      lines.push("**Note:** SDK reported the run as expired (wedged local agent).");
+    }
+    if (typeof meta.cancelReason === "string" && meta.cancelReason) {
+      lines.push(`**Cancel reason:** \`${meta.cancelReason}\``);
+    }
+  }
+
+  const body = job.result ?? "";
+  lines.push("", "**Output:**", "", ...fenceCodeBlock(body));
+
+  if (job.error) {
+    lines.push("", "**Error:**", "", ...fenceCodeBlock(job.error));
+  }
+
+  const handoff = jobAgentHandoffLines(job.agentId);
+  if (handoff.length > 0) {
+    lines.push("", "**Next steps:**", ...handoff);
+  } else {
+    lines.push(
+      "",
+      "**Next steps:**",
+      "- No agent id was recorded for this job — start a new run with `/cursor:task`.",
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 /**

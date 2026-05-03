@@ -110,35 +110,111 @@ describe("CLI: resume", () => {
     expect(sdkMocks.agentResume).not.toHaveBeenCalled();
   });
 
-  it("--list prints recent agent ids and skips the SDK", async () => {
+  it("--list --local prints recent agent ids and skips the SDK", async () => {
     seedAgent("alpha", "agent-alpha");
     await new Promise((r) => setTimeout(r, 5));
     seedAgent("beta", "agent-beta");
 
     const io = captureIO(workDir);
-    expect(await companionMain(argv("resume", "--list"), io)).toBe(0);
+    expect(await companionMain(argv("resume", "--list", "--local"), io)).toBe(0);
     const out = io.captured.stdout.join("");
     expect(out).toContain("AGENT-ID");
     expect(out).toContain("agent-alpha");
     expect(out).toContain("agent-beta");
     expect(sdkMocks.agentResume).not.toHaveBeenCalled();
+    expect(sdkMocks.agentList).not.toHaveBeenCalled();
   });
 
-  it("--list --json emits the structured rows", async () => {
+  it("--list --local --json emits a flat array of local rows", async () => {
     seedAgent("alpha", "agent-alpha");
 
     const io = captureIO(workDir);
-    expect(await companionMain(argv("resume", "--list", "--json"), io)).toBe(0);
+    expect(await companionMain(argv("resume", "--list", "--local", "--json"), io)).toBe(0);
     const parsed = JSON.parse(io.captured.stdout.join(""));
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].agentId).toBe("agent-alpha");
     expect(parsed[0].summary).toBe("alpha");
   });
 
-  it("--list with no jobs prints '(no resumable agents)'", async () => {
+  it("--list (default) merges local with SDK durable agents not in the local index", async () => {
+    seedAgent("alpha", "agent-alpha");
+    sdkMocks.agentList.mockResolvedValue({
+      items: [
+        {
+          agentId: "agent-alpha", // dup with local — should be filtered
+          name: "dup",
+          summary: "dup",
+          lastModified: 1_700_000_000_000,
+        },
+        {
+          agentId: "agent-only-sdk",
+          name: "Remote A",
+          summary: "From the SDK",
+          lastModified: 1_700_000_000_000,
+        },
+      ],
+    });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list"), io)).toBe(0);
+    expect(sdkMocks.agentList).toHaveBeenCalledTimes(1);
+    const out = io.captured.stdout.join("");
+    expect(out).toContain("agent-alpha");
+    expect(out).toContain("agent-only-sdk");
+    expect(out).toContain("Additional durable agents reported by the SDK (1)");
+  });
+
+  it("--list (default) soft-fails when SDK list throws and notes it on stderr", async () => {
+    seedAgent("alpha", "agent-alpha");
+    sdkMocks.agentList.mockRejectedValue(new Error("network down"));
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list"), io)).toBe(0);
+    expect(io.captured.stdout.join("")).toContain("agent-alpha");
+    expect(io.captured.stderr.join("")).toContain("SDK agent list failed");
+    expect(io.captured.stderr.join("")).toContain("network down");
+  });
+
+  it("--list --json emits the merged structured shape", async () => {
+    seedAgent("alpha", "agent-alpha");
+    sdkMocks.agentList.mockResolvedValue({
+      items: [
+        {
+          agentId: "agent-only-sdk",
+          name: "x",
+          summary: "y",
+          lastModified: 1,
+        },
+      ],
+    });
+
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--json"), io)).toBe(0);
+    const parsed = JSON.parse(io.captured.stdout.join(""));
+    expect(Array.isArray(parsed.local)).toBe(true);
+    expect(parsed.local[0].agentId).toBe("agent-alpha");
+    expect(Array.isArray(parsed.remoteOnly)).toBe(true);
+    expect(parsed.remoteOnly[0].agentId).toBe("agent-only-sdk");
+    expect(parsed.remoteError).toBeNull();
+  });
+
+  it("--list with no local jobs prints '(no resumable agents)'", async () => {
+    sdkMocks.agentList.mockResolvedValue({ items: [] });
     const io = captureIO(workDir);
     expect(await companionMain(argv("resume", "--list"), io)).toBe(0);
     expect(io.captured.stdout.join("")).toContain("(no resumable agents)");
+  });
+
+  it("--list --local --remote is rejected", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--list", "--local", "--remote"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("mutually exclusive");
+  });
+
+  it("--local without --list is rejected", async () => {
+    const io = captureIO(workDir);
+    expect(await companionMain(argv("resume", "--local", "agent-x", "go"), io)).toBe(2);
+    expect(io.captured.stderr.join("")).toContain("--local requires --list");
   });
 
   it("--write flips the policy and is reflected in the prompt", async () => {

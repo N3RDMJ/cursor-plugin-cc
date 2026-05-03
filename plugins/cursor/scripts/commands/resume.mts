@@ -22,18 +22,22 @@ import { resolveWorkspaceRoot } from "../lib/workspace.mjs";
 
 const HELP = `cursor-companion resume <agent-id> <prompt> [flags]
 cursor-companion resume --last <prompt> [flags]
-cursor-companion resume --list [--limit <n>] [--json]
+cursor-companion resume --list [--local|--remote] [--limit <n>] [--json]
 
 Reattach to an existing Cursor agent and continue the conversation. The agent
 keeps its prior context, so follow-up prompts are cheaper than starting fresh.
 
 flags:
   --last               Resume the most recent task agent (no agent-id needed)
-  --list               Print known agent ids from this workspace, then exit
-  --remote             With --list: query the SDK for durable agents instead
-                       of the local job index. Combine with --cloud to list
-                       cloud-runtime agents (requires CURSOR_API_KEY).
-  --limit <n>          With --list: cap the number of rows (default 10)
+  --list               Print known agent ids — merges this workspace's local
+                       index with the SDK's durable agent list (local runtime).
+                       Soft-fails on SDK errors with a footer note. Use
+                       --local or --remote to scope to one source.
+  --local              With --list: only show this workspace's job index
+  --remote             With --list: only show the SDK's durable agents
+                       (combine with --cloud to list cloud-runtime agents —
+                       requires CURSOR_API_KEY)
+  --limit <n>          With --list: cap the number of rows per source (default 10)
   --write              Allow file modifications (default: read-only)
   --background         Start the run and exit, returning the job id
   --force              Expire any wedged active local run before sending
@@ -46,11 +50,13 @@ flags:
 
 const DEFAULT_LIST_LIMIT = 10;
 
+type ListSource = "merged" | "local" | "remote";
+
 interface ListFlags {
   kind: "list";
   limit: number;
   json: boolean;
-  remote: boolean;
+  source: ListSource;
   cloud: boolean;
 }
 
@@ -77,6 +83,7 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     long: {
       last: "boolean",
       list: "boolean",
+      local: "boolean",
       remote: "boolean",
       limit: "string",
       write: "boolean",
@@ -96,11 +103,13 @@ function parseFlags(args: readonly string[]): ResumeFlags {
   const list = bool(parsed, "list");
   const json = bool(parsed, "json");
 
+  const local = bool(parsed, "local");
   const remote = bool(parsed, "remote");
   const cloud = bool(parsed, "cloud");
 
   if (list) {
     if (last) throw new UsageError("--list and --last are mutually exclusive");
+    if (local && remote) throw new UsageError("--local and --remote are mutually exclusive");
     let limit = DEFAULT_LIST_LIMIT;
     const limitArg = optionalString(parsed, "limit");
     if (limitArg !== undefined) {
@@ -111,10 +120,12 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     if (cloud && !remote) {
       throw new UsageError("--list --cloud requires --remote (cloud listing goes through the SDK)");
     }
-    return { kind: "list", limit, json, remote, cloud };
+    const source: ListSource = local ? "local" : remote ? "remote" : "merged";
+    return { kind: "list", limit, json, source, cloud };
   }
 
   if (remote) throw new UsageError("--remote requires --list");
+  if (local) throw new UsageError("--local requires --list");
 
   if (optionalString(parsed, "limit") !== undefined) {
     throw new UsageError("--limit requires --list");
@@ -204,6 +215,71 @@ export function renderRemoteListText(rows: RemoteAgentRow[], now: number = Date.
   return `${header}\n${separator}\n${body}\n`;
 }
 
+async function runList(flags: ListFlags, workspaceRoot: string, io: CommandIO): Promise<ExitCode> {
+  if (flags.source === "remote") {
+    const rows = await listRemoteAgents(
+      flags.cloud
+        ? { runtime: "cloud", limit: flags.limit }
+        : { cwd: workspaceRoot, limit: flags.limit },
+    );
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
+    } else {
+      io.stdout.write(renderRemoteListText(rows));
+    }
+    return 0;
+  }
+
+  const stateDir = resolveStateDir(workspaceRoot);
+  const localRows = findRecentTaskAgents(stateDir, flags.limit);
+
+  if (flags.source === "local") {
+    if (flags.json) {
+      io.stdout.write(`${JSON.stringify(localRows, null, 2)}\n`);
+    } else {
+      io.stdout.write(renderListText(localRows));
+    }
+    return 0;
+  }
+
+  // Merged view (default): union local index with the SDK's local-runtime
+  // durable agents, deduplicated by agentId. Local entries win on conflict
+  // because they carry job-id + summary that the SDK list lacks. SDK errors
+  // are non-fatal — most users care about local agents and the remote query
+  // is an enrichment.
+  let remoteRows: RemoteAgentRow[] = [];
+  let remoteError: string | undefined;
+  try {
+    remoteRows = await listRemoteAgents({ cwd: workspaceRoot, limit: flags.limit });
+  } catch (err) {
+    remoteError = err instanceof Error ? err.message : String(err);
+  }
+  const seenLocal = new Set(localRows.map((r) => r.agentId));
+  const remoteOnly = remoteRows.filter((r) => !seenLocal.has(r.agentId));
+
+  if (flags.json) {
+    io.stdout.write(
+      `${JSON.stringify({ local: localRows, remoteOnly, remoteError: remoteError ?? null }, null, 2)}\n`,
+    );
+    return 0;
+  }
+
+  io.stdout.write(renderListText(localRows));
+  if (remoteOnly.length > 0) {
+    io.stdout.write(`\nAdditional durable agents reported by the SDK (${remoteOnly.length}):\n`);
+    io.stdout.write(renderRemoteListText(remoteOnly));
+  } else if (!remoteError && localRows.length > 0) {
+    io.stdout.write("\n(no additional durable agents reported by the SDK)\n");
+  }
+  if (remoteError) {
+    io.stderr.write(
+      `\nnote: SDK agent list failed (${remoteError}); showing local index only. ` +
+        "Pass --local to suppress this lookup.\n",
+    );
+  }
+  return 0;
+}
+
 export async function runResume(args: readonly string[], io: CommandIO): Promise<ExitCode> {
   let flags: ResumeFlags;
   try {
@@ -220,27 +296,7 @@ export async function runResume(args: readonly string[], io: CommandIO): Promise
   const workspaceRoot = resolveWorkspaceRoot(cwd);
 
   if (flags.kind === "list") {
-    if (flags.remote) {
-      const rows = await listRemoteAgents(
-        flags.cloud
-          ? { runtime: "cloud", limit: flags.limit }
-          : { cwd: workspaceRoot, limit: flags.limit },
-      );
-      if (flags.json) {
-        io.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-      } else {
-        io.stdout.write(renderRemoteListText(rows));
-      }
-      return 0;
-    }
-    const stateDir = resolveStateDir(workspaceRoot);
-    const rows = findRecentTaskAgents(stateDir, flags.limit);
-    if (flags.json) {
-      io.stdout.write(`${JSON.stringify(rows, null, 2)}\n`);
-    } else {
-      io.stdout.write(renderListText(rows));
-    }
-    return 0;
+    return runList(flags, workspaceRoot, io);
   }
 
   const stateDir = ensureStateDir(resolveStateDir(workspaceRoot));

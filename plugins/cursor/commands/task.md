@@ -24,7 +24,7 @@ Execution mode:
 - Otherwise, before starting Cursor, check for a resumable agent from this workspace by running:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --list --json --limit 1 2>/dev/null
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --list --local --json --limit 1 2>/dev/null
 ```
 
 - If that command outputs a non-empty agent list (at least one agent ID), use `AskUserQuestion` exactly once to ask whether to continue the current Cursor thread or start a new one.
@@ -36,6 +36,16 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" resume --list -
 - If the user chooses continue, add `--resume-last` before routing to the subagent.
 - If the user chooses a new thread, do not add `--resume-last`.
 - If the helper reports no available agent, do not ask. Route normally.
+
+Gate behavior (only one `AskUserQuestion` fires per `/cursor:task`):
+
+- The resume gate above is the only prompt this command issues. Execution mode
+  defaults silently to foreground unless `--background` or `--wait` is set.
+- To skip the gate entirely, pass `--resume-last` (continue) or `--fresh`
+  (new thread). Both flags are honoured before any prompt is built.
+- `/cursor:review` has its own wait/background gate. Running these commands
+  back-to-back can produce two consecutive prompts (one from each command);
+  pass the suppressing flags above to skip them when chaining.
 
 Operating rules:
 
