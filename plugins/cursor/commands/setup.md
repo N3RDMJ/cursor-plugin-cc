@@ -42,15 +42,17 @@ Show the script command as the recommended `--login` path:
 ~/.claude/cursor-login
 ```
 
-If the user wants the environment-variable path, give them a concrete command
-they can copy, edit, and run in their normal terminal:
+If the user wants the environment-variable path, give them a readable command
+they can copy, replace the placeholder value in, and run in their normal
+terminal:
 
 ```bash
-echo 'export CURSOR_API_KEY="key_..."' >> ~/.bashrc
+echo 'export CURSOR_API_KEY="YOUR_CURSOR_API_KEY_HERE"' >> ~/.bashrc
 ```
 
-Tell them to replace `key_...` with their Cursor API key, use `~/.zshrc` instead
-if they use zsh, and start a new Claude Code session afterward.
+Tell them to replace `YOUR_CURSOR_API_KEY_HERE` with their Cursor API key, use
+`~/.zshrc` instead if they use zsh, and start a new Claude Code session
+afterward.
 
 If the user asks to paste the key into chat anyway, repeat that this exposes the
 key to the Claude Code transcript and normal prompt flow. Do not handle the key
