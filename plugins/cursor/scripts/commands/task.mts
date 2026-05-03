@@ -104,8 +104,7 @@ function parseFlags(args: readonly string[], cwd: string): TaskFlags {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json"),
   };
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

@@ -19,7 +19,7 @@ import {
   resolveStateDir,
   resolveWorkspaceRoot,
   writeJsonAtomic
-} from "./chunk-5GJCFYFO.mjs";
+} from "./chunk-MTISK4JK.mjs";
 
 // plugins/cursor/scripts/lib/render.mts
 function formatDuration(ms) {
@@ -400,8 +400,7 @@ function parseFlags(args) {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

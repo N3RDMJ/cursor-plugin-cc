@@ -14,7 +14,7 @@ import {
   renderTaskResultCard,
   runReview,
   setGateEnabled
-} from "./chunk-GFSYWFX6.mjs";
+} from "./chunk-FI3FRORZ.mjs";
 import {
   DEFAULT_MODEL,
   RUN_NOT_ACTIVE_REASON,
@@ -47,7 +47,6 @@ import {
   optionalModelArg,
   optionalString,
   parseArgs,
-  parseModelArg,
   readJobLog,
   readJson,
   reconcileStaleJobs,
@@ -66,7 +65,7 @@ import {
   validateModel,
   whoami,
   writeJsonAtomic
-} from "./chunk-5GJCFYFO.mjs";
+} from "./chunk-MTISK4JK.mjs";
 
 // plugins/cursor/scripts/commands/cancel.mts
 var HELP = `cursor-companion cancel <job-id> [--json] [--help]
@@ -396,8 +395,7 @@ function parseFlags(args) {
     cloud,
     json
   };
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
@@ -1122,20 +1120,16 @@ async function runSetup(args, io) {
   if (enableGate && disableGate) {
     throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
   }
-  const setModelArg = optionalString(parsed, "set-model");
+  const setModel = optionalModelArg(parsed, "set-model");
   const clearModel = bool(parsed, "clear-model");
-  if (setModelArg && clearModel) {
+  if (setModel && clearModel) {
     throw new UsageError("--set-model and --clear-model are mutually exclusive");
   }
-  if (setModelArg !== void 0 && setModelArg.trim() === "") {
-    throw new UsageError("--set-model requires a non-empty model id");
-  }
   let prefetchedCatalog;
-  if (setModelArg) {
-    const selection = parseModelArg(setModelArg);
+  if (setModel) {
     prefetchedCatalog = await listModels();
-    await validateModel(selection, { catalog: prefetchedCatalog });
-    setDefaultModel(selection);
+    await validateModel(setModel, { catalog: prefetchedCatalog });
+    setDefaultModel(setModel);
   } else if (clearModel) {
     clearDefaultModel();
   }
@@ -1410,8 +1404,7 @@ function parseFlags2(args, cwd) {
     cloud: bool(parsed, "cloud"),
     json: bool(parsed, "json")
   };
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

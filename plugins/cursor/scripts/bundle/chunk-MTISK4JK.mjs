@@ -1161,7 +1161,6 @@ export {
   getBranch,
   resolveReviewTarget,
   getSourceTree,
-  parseModelArg,
   formatModelSelection,
   optionalModelArg,
   resolveStateDir,

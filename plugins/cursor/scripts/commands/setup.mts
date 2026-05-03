@@ -1,7 +1,7 @@
 import type { ModelSelection, SDKModel } from "@cursor/sdk";
 
 import type { CommandIO, ExitCode } from "../cursor-companion.mjs";
-import { bool, optionalString, parseArgs, UsageError } from "../lib/args.mjs";
+import { bool, parseArgs, UsageError } from "../lib/args.mjs";
 import { deleteApiKey, detectBackend, type KeySource, storeApiKey } from "../lib/credentials.mjs";
 import {
   DEFAULT_MODEL,
@@ -18,7 +18,7 @@ import {
   readBootstrapStatus,
   resolvePluginRoot,
 } from "../lib/install.mjs";
-import { formatModelSelection, parseModelArg } from "../lib/model-arg.mjs";
+import { formatModelSelection, optionalModelArg } from "../lib/model-arg.mjs";
 import { escapeMarkdownCell } from "../lib/render.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
 import {
@@ -491,21 +491,17 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     throw new UsageError("--enable-gate and --disable-gate are mutually exclusive");
   }
 
-  const setModelArg = optionalString(parsed, "set-model");
+  const setModel = optionalModelArg(parsed, "set-model");
   const clearModel = bool(parsed, "clear-model");
-  if (setModelArg && clearModel) {
+  if (setModel && clearModel) {
     throw new UsageError("--set-model and --clear-model are mutually exclusive");
-  }
-  if (setModelArg !== undefined && setModelArg.trim() === "") {
-    throw new UsageError("--set-model requires a non-empty model id");
   }
 
   let prefetchedCatalog: SDKModel[] | undefined;
-  if (setModelArg) {
-    const selection = parseModelArg(setModelArg);
+  if (setModel) {
     prefetchedCatalog = await listModels();
-    await validateModel(selection, { catalog: prefetchedCatalog });
-    setDefaultModel(selection);
+    await validateModel(setModel, { catalog: prefetchedCatalog });
+    setDefaultModel(setModel);
   } else if (clearModel) {
     clearDefaultModel();
   }

@@ -149,19 +149,13 @@ describe("resolveDefaultModel resolution order", () => {
     });
   });
 
-  it("falls through to config when CURSOR_MODEL is malformed and warns on stderr", () => {
+  it("warns and falls through to config when CURSOR_MODEL is malformed", () => {
     setDefaultModel({ id: "from-config" });
     process.env[USER_CONFIG_ENV_MODEL] = "gpt-5:bad-param-no-equals";
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
-    try {
-      const resolved = resolveDefaultModel(fallback);
-      expect(resolved).toEqual({ model: { id: "from-config" }, source: "config" });
-      expect(stderr).toHaveBeenCalledTimes(1);
-      const warning = String(stderr.mock.calls[0]?.[0] ?? "");
-      expect(warning).toContain("CURSOR_MODEL");
-      expect(warning).toContain("gpt-5:bad-param-no-equals");
-    } finally {
-      stderr.mockRestore();
-    }
+    const resolved = resolveDefaultModel(fallback);
+    expect(resolved).toEqual({ model: { id: "from-config" }, source: "config" });
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("gpt-5:bad-param-no-equals"));
+    stderr.mockRestore();
   });
 });

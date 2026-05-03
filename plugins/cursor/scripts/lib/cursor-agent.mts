@@ -333,15 +333,9 @@ export async function listModels(opts: RequestOptions = {}): Promise<SDKModel[]>
 }
 
 /**
- * Confirm a ModelSelection.id is in the catalog, and (when the catalog
- * advertises a `parameters` schema) that any supplied `params` are known
- * keys with allowed values. Pass `catalog` when you've already fetched the
- * list to share one fetch between validation and a subsequent report —
- * otherwise the catalog is fetched fresh.
- *
- * If the catalog entry omits `parameters`, params are accepted unchanged
- * for forward-compatibility — the SDK may surface new tunables before the
- * plugin has been updated.
+ * Verify a ModelSelection against the catalog. Params pass through unchecked
+ * when the SDK doesn't advertise a `parameters` schema, so the plugin doesn't
+ * reject SDK-side additions it hasn't been updated for yet.
  */
 export async function validateModel(
   model: ModelSelection,

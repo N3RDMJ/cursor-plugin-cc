@@ -2,14 +2,7 @@ import type { ModelSelection } from "@cursor/sdk";
 
 import { optionalString, type ParsedArgs, UsageError } from "./args.mjs";
 
-/**
- * Parse a `--model` / `--set-model` / `CURSOR_MODEL` value into a
- * `ModelSelection`. Syntax:
- *
- *   gpt-5
- *   gpt-5:reasoning_effort=low
- *   gpt-5:reasoning_effort=low,verbosity=high
- */
+/** Parse an `id[:k=v,k=v]` selector (e.g. `gpt-5:reasoning_effort=low`). */
 export function parseModelArg(input: string): ModelSelection {
   const trimmed = input.trim();
   if (!trimmed) throw new UsageError("model selector is empty");
@@ -51,11 +44,7 @@ export function parseModelArg(input: string): ModelSelection {
   return { id, params };
 }
 
-/**
- * Render a `ModelSelection` back into the canonical `id[:k=v,k=v]` form.
- * Params are sorted by key so the output is stable across runs and usable
- * as a dedup key.
- */
+/** Render `ModelSelection` to canonical `id[:k=v,k=v]` form. Sorts params for stable dedup keys. */
 export function formatModelSelection(model: ModelSelection): string {
   if (!model.params || model.params.length === 0) return model.id;
   const pairs = [...model.params]

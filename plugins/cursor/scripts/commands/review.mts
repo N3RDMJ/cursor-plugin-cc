@@ -97,8 +97,7 @@ function parseFlags(args: readonly string[]): ReviewFlags {
   };
   const base = optionalString(parsed, "base");
   if (base) flags.baseRef = base;
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);

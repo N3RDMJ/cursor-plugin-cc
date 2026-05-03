@@ -162,8 +162,7 @@ function parseFlags(args: readonly string[]): ResumeFlags {
     cloud,
     json,
   };
-  const model = optionalModelArg(parsed, "model");
-  if (model) flags.model = model;
+  flags.model = optionalModelArg(parsed, "model");
   const timeout = optionalString(parsed, "timeout");
   if (timeout) {
     const ms = Number(timeout);
