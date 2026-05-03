@@ -353,8 +353,8 @@ function renderTaskResultCard(job) {
   lines.push(`**Status:** ${statusBits.join(" \u2014 ")}`);
   if (job.agentId) lines.push(`**Agent:** \`${job.agentId}\``);
   if (job.runId) lines.push(`**Run:** \`${job.runId}\``);
-  if (job.metadata) {
-    const meta = job.metadata;
+  const meta = job.metadata;
+  if (meta) {
     if (meta.timedOut === true) {
       lines.push("**Note:** run exceeded its timeout and was cancelled by the plugin.");
     }
