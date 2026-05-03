@@ -25,37 +25,31 @@ Surface the output verbatim. On success the next `/cursor:setup` should show
 
 ## When `--login` is passed
 
-Do NOT run the CLI directly. Present **two options** to the user:
+Do NOT run the CLI directly. Ask the user to paste their Cursor API key in
+the conversation. Before they paste, warn them:
 
-### Option A — Secure hidden input (recommended)
-
-Tell the user they can enter their key securely via hidden input by running
-this command in their Claude Code prompt. Present it ready to copy:
-
-```
-! node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login
-```
-
-The key never appears in the conversation — it is read as hidden terminal
-input, validated via `Cursor.me()`, and stored in the OS keychain.
-
-### Option B — Paste in chat (convenient)
-
-If the user prefers, they can paste the key directly in the conversation.
-Warn them: "Note: the key will be visible in this conversation's transcript.
-It is sent to the Cursor API for validation and stored in your OS keychain."
+"Paste your Cursor API key below. It will be visible in this conversation's
+transcript, but will be validated and stored securely in your OS keychain."
 
 Once the user provides the key, write it to a temp file and pipe it to the
-CLI so it stays out of process arguments:
+CLI so it stays out of shell history and process arguments:
 
 ```bash
 printf '%s' '<THE_KEY>' > /tmp/.cursor-key-$$ && node "${CLAUDE_PLUGIN_ROOT}/scripts/bundle/cursor-companion.mjs" setup --login < /tmp/.cursor-key-$$ ; rm -f /tmp/.cursor-key-$$
 ```
 
 Report the result to the user. If it succeeded, tell them the key is stored
-in their OS keychain. If it failed, relay the error.
+in their OS keychain and they can verify with `/cursor:setup`. If it failed,
+relay the error.
 
 **Do not** echo the key back or include it in any output beyond the command.
+
+Alternatively, mention the user can run `cursor-login.sh` from a separate
+terminal for secure hidden input:
+
+```
+./plugins/cursor/scripts/cursor-login.sh
+```
 
 ## When `--logout` is passed
 
@@ -83,6 +77,10 @@ If the **SDK** row is `fail`, recommend `/cursor:setup --install` as the
 remediation. The default report includes a remediation hint at the bottom in
 that case.
 
+If the **API key** row is `fail`, immediately ask the user to paste their
+Cursor API key. Follow the same flow described in the `--login` section above.
+Do not make the user run `/cursor:setup --login` as a separate step.
+
 ## Credential management
 
 The plugin resolves the Cursor API key in this order:
@@ -93,9 +91,8 @@ The plugin resolves the Cursor API key in this order:
 
 Manage the keychain credential via:
 
-- `--login` — two paths: hidden terminal input (secure, recommended) or
-  paste-in-chat (convenient). Both validate via `Cursor.me()` and store in
-  the OS keychain.
+- `--login` — asks for the API key in chat, validates via `Cursor.me()`,
+  and stores it in the OS keychain.
 - `--logout` — remove the stored key from the OS keychain.
 
 The setup output's "API key" row reports the active key source (`env`,
