@@ -11,6 +11,13 @@ import {
   whoami,
 } from "../lib/cursor-agent.mjs";
 import { readGateConfig, setGateEnabled } from "../lib/gate.mjs";
+import {
+  type BootstrapStatus,
+  installAndRecord,
+  isSdkInstalled,
+  readBootstrapStatus,
+  resolvePluginRoot,
+} from "../lib/install.mjs";
 import { escapeMarkdownCell } from "../lib/render.mjs";
 import { resolveStateDir } from "../lib/state.mjs";
 import {
@@ -33,9 +40,15 @@ const HELP = `cursor-companion setup [flags]
 
 Validates the plugin runtime:
   - Node.js >= ${NODE_MIN_MAJOR}
+  - @cursor/sdk is installed (bootstrap.mjs ran successfully)
   - API key is available (env or keychain)
   - Cursor.me() succeeds (key is valid)
   - Cursor.models.list() returns at least one model
+
+SDK installation:
+  --install            Run \`npm install --omit=dev\` in the plugin root.
+                       Use this when bootstrap reports a failure or the
+                       SDK row in the report is "fail".
 
 Credential management:
   --login              Store a Cursor API key in the OS keychain.
@@ -105,6 +118,11 @@ export function modelChoices(models: Awaited<ReturnType<typeof listModels>>): Mo
 
 interface SetupReport {
   node: { ok: boolean; version: string };
+  sdk: {
+    ok: boolean;
+    pluginRoot: string;
+    bootstrap?: BootstrapStatus;
+  };
   apiKey: { ok: boolean; source?: KeySource; error?: string };
   account: { ok: boolean; apiKeyName?: string; error?: string };
   models: { ok: boolean; choices: ModelChoice[]; error?: string };
@@ -118,6 +136,19 @@ interface BuildReportInput {
   prefetchedCatalog?: SDKModel[];
 }
 
+const INSTALL_REMEDIATION = "Run /cursor:setup --install to (re)install the SDK.";
+
+function buildSdkReport(): SetupReport["sdk"] {
+  const pluginRoot = resolvePluginRoot();
+  // A loadable SDK overrides a stale `ok: false` from a prior failed bootstrap
+  // (e.g. the user fixed the install manually) — otherwise the row would lie.
+  const ok = isSdkInstalled(pluginRoot);
+  const bootstrap = readBootstrapStatus(pluginRoot);
+  const sdk: SetupReport["sdk"] = { ok, pluginRoot };
+  if (bootstrap) sdk.bootstrap = bootstrap;
+  return sdk;
+}
+
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
 }
@@ -126,6 +157,7 @@ async function buildReport(input: BuildReportInput): Promise<SetupReport> {
   const resolved = resolveDefaultModel(DEFAULT_MODEL);
   const report: SetupReport = {
     node: { ok: nodeMajor() >= NODE_MIN_MAJOR, version: process.versions.node },
+    sdk: buildSdkReport(),
     apiKey: { ok: false },
     account: { ok: false },
     models: { ok: false, choices: [] },
@@ -177,6 +209,7 @@ function renderReport(report: SetupReport): string {
     );
   };
   row("Node.js", yes(report.node.ok), report.node.version);
+  row("SDK", yes(report.sdk.ok), describeSdk(report.sdk));
   const keyDetail = report.apiKey.ok
     ? `source: ${report.apiKey.source}`
     : (report.apiKey.error ?? "");
@@ -201,7 +234,20 @@ function renderReport(report: SetupReport): string {
       lines.push(`- ${choice.label} \`[${choice.selection.id}]\``);
     }
   }
+  if (!report.sdk.ok) {
+    lines.push("");
+    lines.push(`> ${INSTALL_REMEDIATION}`);
+  }
   return `${lines.join("\n")}\n`;
+}
+
+function describeSdk(sdk: SetupReport["sdk"]): string {
+  if (sdk.ok) {
+    if (sdk.bootstrap?.ok) return `installed (last bootstrap: ${sdk.bootstrap.attemptedAt})`;
+    return "installed";
+  }
+  if (sdk.bootstrap?.error) return `bootstrap failed: ${sdk.bootstrap.error}`;
+  return "not installed";
 }
 
 function describeSource(source: DefaultModelSource): string {
@@ -306,6 +352,37 @@ async function runLogin(io: CommandIO, json: boolean): Promise<ExitCode> {
   return 0;
 }
 
+async function runInstall(io: CommandIO, json: boolean): Promise<ExitCode> {
+  const pluginRoot = resolvePluginRoot();
+  if (!json) {
+    io.stdout.write(`Installing @cursor/sdk in ${pluginRoot}\n`);
+  }
+  const result = await installAndRecord(pluginRoot, {
+    onOutput: json ? undefined : (chunk) => io.stderr.write(chunk),
+  });
+
+  if (json) {
+    io.stdout.write(
+      `${JSON.stringify(
+        {
+          ok: result.ok,
+          pluginRoot,
+          durationMs: result.durationMs,
+          command: result.command,
+          ...(result.error ? { error: result.error } : {}),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  } else if (result.ok) {
+    io.stdout.write(`Install succeeded in ${result.durationMs}ms.\n`);
+  } else {
+    io.stderr.write(`Install failed: ${result.error ?? "unknown error"}\n`);
+  }
+  return result.ok ? 0 : 1;
+}
+
 async function runLogout(io: CommandIO, json: boolean): Promise<ExitCode> {
   const backend = detectBackend();
   if (!backend) {
@@ -333,6 +410,7 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     long: {
       json: "boolean",
       help: "boolean",
+      install: "boolean",
       login: "boolean",
       logout: "boolean",
       "enable-gate": "boolean",
@@ -349,9 +427,11 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
 
   const jsonFlag = bool(parsed, "json");
 
-  if (bool(parsed, "login") && bool(parsed, "logout")) {
-    throw new UsageError("--login and --logout are mutually exclusive");
+  const exclusive = ["install", "login", "logout"].filter((flag) => bool(parsed, flag));
+  if (exclusive.length > 1) {
+    throw new UsageError(`${exclusive.map((f) => `--${f}`).join(" and ")} are mutually exclusive`);
   }
+  if (bool(parsed, "install")) return runInstall(io, jsonFlag);
   if (bool(parsed, "login")) return runLogin(io, jsonFlag);
   if (bool(parsed, "logout")) return runLogout(io, jsonFlag);
 
@@ -398,6 +478,7 @@ export async function runSetup(args: readonly string[], io: CommandIO): Promise<
     io.stdout.write(renderReport(report));
   }
 
-  const allOk = report.node.ok && report.apiKey.ok && report.account.ok && report.models.ok;
+  const allOk =
+    report.node.ok && report.sdk.ok && report.apiKey.ok && report.account.ok && report.models.ok;
   return allOk ? 0 : 1;
 }
