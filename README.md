@@ -180,6 +180,14 @@ Validate runtime configuration and manage credentials, the review gate, and the 
 /cursor:setup --clear-model       # revert to built-in default
 ```
 
+> [!TIP]
+> For the keychain login flow, run `~/.claude/cursor-login` directly from a
+> normal terminal instead of `/cursor:setup --login` inside Claude Code. The
+> standalone script prompts with masked input locally, so your API key never
+> passes through Claude Code's chat. It's a thin wrapper around
+> `plugins/cursor/scripts/cursor-login.sh` and is symlinked into `~/.claude/`
+> by the plugin's bootstrap step.
+
 ## Stop Review Gate
 
 An opt-in hook that runs a Cursor review every time Claude is about to stop. If the review finds critical issues, the stop is blocked so Claude can address them first.
